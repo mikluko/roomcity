@@ -1,0 +1,7 @@
+*
+!apt/
+!cmd/
+!go.mod
+!go.sum
+!internal/
+!scripts/

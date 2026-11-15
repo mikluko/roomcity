@@ -1,0 +1,33 @@
+name: image
+
+# Builds the image for a pull request, without pushing it, and runs its tools
+# inside it: the Dockerfile's smoke stage.
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - go.mod
+      - go.sum
+      - apt/**
+      - cmd/**
+      - internal/**
+      - scripts/smoke-image.sh
+      - .forgejo/workflows/image.yaml
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: https://github.com/actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build the image and run its tools
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --target smoke \
+            --no-cache-filter smoke \
+            --progress plain \
+            .

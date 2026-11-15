@@ -1,0 +1,51 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  BUF: github.com/bufbuild/buf/cmd/buf@v1.75.0
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: https://github.com/actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: https://github.com/actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go install "$BUF"
+      - run: make lint
+      - run: make test
+      - name: Check that internal/gen is what proto/ generates
+        run: |
+          make generate
+          git diff --exit-code -- internal/gen
+
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: https://github.com/actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A pull request is checked as merged: a branch cut before a release and
+      # merged after it can be green on its own head and still land its notes
+      # in a section the release has frozen.
+      - name: Merge the base branch into the checkout
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git -c user.name=ci -c user.email=ci@localhost merge --no-edit "origin/${BASE_REF}" || {
+            echo "::error::this branch does not merge cleanly into ${BASE_REF}: rebase it"
+            exit 1
+          }
+      - uses: https://sarak.sh/mikluko/changelog/actions/validate@v2
+        with:
+          fragments: ""

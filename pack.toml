@@ -1,0 +1,10 @@
+[pack]
+name = "roomcity"
+schema = 2
+description = "Gas City session runtime that drives sessions over ACP, with a chat room as each session's interface"
+
+[runtimes.room]
+# gc runs the command as one executable name, so this is a link to roomcity,
+# which acts as "roomcity runtime" under it.
+command = "gc-runtime-room"
+protocol = 0

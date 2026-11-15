@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package roomcity.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// HostService is what a session host calls on the server. The host dials
+// the server and never the reverse, so a host that outlives a restart of the
+// server attaches again on its own.
+service HostService {
+  // Attach opens the stream of instructions for one session. A host that
+  // attaches again names the last instruction it carried out and receives
+  // the ones after it.
+  rpc Attach(AttachRequest) returns (stream AttachResponse);
+  // Report hands the server the ACP messages exchanged with the agent, in
+  // order. The server acknowledges the last one it stored; the host sends
+  // the ones after it again when a call fails.
+  rpc Report(ReportRequest) returns (ReportResponse);
+}
+
+message AttachRequest {
+  // The session's name, as gc gave it to the runtime at start.
+  string session = 1;
+  // The seq of the last instruction the host carried out, 0 for none.
+  uint64 last_seq = 2;
+}
+
+message AttachResponse {
+  // The instruction's place in the session's order, from 1.
+  uint64 seq = 1;
+  oneof instruction {
+    Prompt prompt = 2;
+    Cancel cancel = 3;
+    PermissionAnswer permission_answer = 4;
+    Stop stop = 5;
+  }
+}
+
+// Prompt is text for the agent: its next turn when it is idle.
+message Prompt {
+  string text = 1;
+  PromptSource source = 2;
+}
+
+enum PromptSource {
+  PROMPT_SOURCE_UNSPECIFIED = 0;
+  // The owner wrote it in the session's room.
+  PROMPT_SOURCE_OWNER = 1;
+  // gc sent it as a nudge.
+  PROMPT_SOURCE_GC = 2;
+}
+
+// Cancel ends the running turn, as ACP's session/cancel does.
+message Cancel {}
+
+// PermissionAnswer answers one session/request_permission of the agent.
+message PermissionAnswer {
+  // The id of the agent's JSON-RPC request, as JSON.
+  string request_id = 1;
+  // The id of the option chosen among those the request offered. Empty
+  // means the request is cancelled.
+  string option_id = 2;
+}
+
+// Stop ends the agent and the host with it.
+message Stop {}
+
+message ReportRequest {
+  string session = 1;
+  repeated Frame frames = 2;
+}
+
+message ReportResponse {
+  // The seq of the last frame the server has stored for the session.
+  uint64 last_seq = 1;
+}
+
+// Frame is one JSON-RPC message of the ACP stream between the host and the
+// agent, as it was on the wire.
+message Frame {
+  // The frame's place in the session's stream, from 1.
+  uint64 seq = 1;
+  google.protobuf.Timestamp time = 2;
+  FrameDirection direction = 3;
+  bytes message = 4;
+}
+
+enum FrameDirection {
+  FRAME_DIRECTION_UNSPECIFIED = 0;
+  FRAME_DIRECTION_TO_AGENT = 1;
+  FRAME_DIRECTION_FROM_AGENT = 2;
+}

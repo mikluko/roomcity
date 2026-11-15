@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package roomcity.v1;
+
+// GcService is what the stand-in gc of a session calls on the server: the
+// hooks and the agent run gc in the session's pod, and the real gc runs on
+// the server's side, in the city's directory.
+service GcService {
+  // Run runs gc once with the stand-in's arguments and returns what it
+  // printed and how it ended.
+  rpc Run(RunRequest) returns (RunResponse);
+}
+
+message RunRequest {
+  // The session whose pod the stand-in runs in.
+  string session = 1;
+  // gc's arguments, without the program name.
+  repeated string args = 2;
+  bytes stdin = 3;
+  // The GC_* variables of the stand-in's environment.
+  map<string, string> env = 4;
+  // The stand-in's working directory in the session's pod.
+  string cwd = 5;
+}
+
+message RunResponse {
+  bytes stdout = 1;
+  bytes stderr = 2;
+  int32 exit_code = 3;
+}

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package roomcity.v1;
+
+// RuntimeService is what the command gc-runtime-room calls on the server:
+// one call for each invocation gc makes of its exec session runtime.
+service RuntimeService {
+  // Operate carries one operation of gc's Runtime Provider Protocol to the
+  // server and returns what the command hands back to gc.
+  rpc Operate(OperateRequest) returns (OperateResponse);
+}
+
+message OperateRequest {
+  // The operation name, the command's first argument: "start", "nudge",
+  // "is-running" and the rest of the protocol's table.
+  string operation = 1;
+  // The arguments after the operation, the session name first where the
+  // operation takes one.
+  repeated string args = 2;
+  // The command's whole standard input: the start config, a nudge's text, a
+  // mark's value.
+  bytes stdin = 3;
+  // The GC_* variables gc set for the invocation.
+  map<string, string> env = 4;
+}
+
+message OperateResponse {
+  bytes stdout = 1;
+  bytes stderr = 2;
+  // The exit code the command ends with. gc reads 2 as an operation the
+  // runtime does not know.
+  int32 exit_code = 3;
+}
