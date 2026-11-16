@@ -82,8 +82,11 @@ type Registry struct {
 	db  *sql.DB
 	now func() time.Time
 
-	mu    sync.Mutex
-	waits map[chan struct{}]struct{}
+	mu       sync.Mutex
+	waits    map[chan struct{}]struct{}
+	activity map[string]*activityState
+
+	activityMu sync.Mutex
 }
 
 var (
@@ -114,7 +117,7 @@ func Open(ctx context.Context, path string) (*Registry, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("session: schema: %w", err)
 	}
-	return &Registry{db: db, now: time.Now, waits: map[chan struct{}]struct{}{}}, nil
+	return &Registry{db: db, now: time.Now, waits: map[chan struct{}]struct{}{}, activity: map[string]*activityState{}}, nil
 }
 
 // Close closes the database.

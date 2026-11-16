@@ -569,3 +569,65 @@ func TestMarksAreKeptPerSessionAndEmptyWhenUnset(t *testing.T) {
 	v, _ = r.Mark(ctx, "s", "other")
 	require.Empty(t, v)
 }
+
+func TestActivityFollowsTheTurnsOfTheFrames(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Activity(ctx, "nobody")
+	require.ErrorIs(t, err, session.ErrNotFound)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	act, err := r.Activity(ctx, "s")
+	require.NoError(t, err)
+	require.Equal(t, session.Activity{}, act)
+
+	at := time.Unix(1700000000, 0)
+	seq := uint64(0)
+	report := func(d session.Direction, msg string) {
+		seq++
+		at = at.Add(time.Second)
+		_, err := r.Report(ctx, "s", []session.HostFrame{{Seq: seq, Time: at, Direction: d, Message: []byte(msg)}})
+		require.NoError(t, err)
+	}
+	report(session.ToAgent, `{"jsonrpc":"2.0","id":3,"method":"session/prompt"}`)
+	act, err = r.Activity(ctx, "s")
+	require.NoError(t, err)
+	require.True(t, act.Turn)
+	require.True(t, act.Last.Equal(at))
+
+	// A response to another request does not end the turn; its own does.
+	report(session.FromAgent, `{"jsonrpc":"2.0","id":4,"result":{}}`)
+	act, _ = r.Activity(ctx, "s")
+	require.True(t, act.Turn)
+	report(session.FromAgent, `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}`)
+	act, _ = r.Activity(ctx, "s")
+	require.False(t, act.Turn)
+	require.True(t, act.Last.Equal(at))
+
+	// A start afresh ends a turn that was running.
+	report(session.ToAgent, `{"jsonrpc":"2.0","id":5,"method":"session/prompt"}`)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	act, _ = r.Activity(ctx, "s")
+	require.False(t, act.Turn)
+}
+
+func TestTailReturnsTheLastEventsInOrder(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	for i := uint64(1); i <= 5; i++ {
+		_, err = r.Report(ctx, "s", []session.HostFrame{{Seq: i, Direction: session.ToAgent, Message: []byte("x")}})
+		require.NoError(t, err)
+	}
+	evs, err := r.Tail(ctx, "s", 3)
+	require.NoError(t, err)
+	require.Len(t, evs, 3)
+	require.Equal(t, uint64(4), evs[0].Number())
+	require.Equal(t, uint64(6), evs[2].Number())
+	evs, err = r.Tail(ctx, "s", 100)
+	require.NoError(t, err)
+	require.Len(t, evs, 6)
+}

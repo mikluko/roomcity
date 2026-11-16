@@ -94,6 +94,8 @@ type Processes interface {
 	Stop(ctx context.Context, name string) error
 	Alive(name string) bool
 	Running() []string
+	// Tail returns the last lines of the process's output.
+	Tail(name string, lines int) []string
 }
 
 // Operator implements roomcityv1connect.RuntimeServiceHandler. It trusts its
@@ -215,6 +217,39 @@ func (o *Operator) run(ctx context.Context, m *roomcityv1.OperateRequest) result
 			return failf("%s: no key", m.Operation)
 		}
 		return o.meta(ctx, m.Operation, name, args[1], m.Stdin)
+	case "protocol":
+		return protocol()
+	case "peek":
+		if r := needName(); r != nil {
+			return *r
+		}
+		lines := ""
+		if len(args) > 1 {
+			lines = args[1]
+		}
+		return o.peek(ctx, name, lines)
+	case "get-last-activity":
+		if r := needName(); r != nil {
+			return *r
+		}
+		return o.lastActivity(ctx, name)
+	case "interrupt":
+		if r := needName(); r != nil {
+			return *r
+		}
+		return o.interrupt(ctx, name)
+	case "send-keys":
+		if r := needName(); r != nil {
+			return *r
+		}
+		return o.sendKeys(ctx, name, args[1:])
+	case "clear-scrollback":
+		return ok("")
+	case "is-attached":
+		if r := needName(); r != nil {
+			return *r
+		}
+		return isAttached()
 	}
 	return result{code: exitUnknown}
 }

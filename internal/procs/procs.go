@@ -178,6 +178,21 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	return nil
 }
 
+// Tail returns the last lines of the output of the process, all of them for
+// lines <= 0; it is nothing for a name that never had one. It reads the
+// current file of the log, not the one before the cut.
+func (m *Manager) Tail(name string, lines int) []string {
+	b, err := os.ReadFile(filepath.Join(m.LogDir, name+".log"))
+	if err != nil {
+		return nil
+	}
+	out := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if lines > 0 && len(out) > lines {
+		out = out[len(out)-lines:]
+	}
+	return out
+}
+
 // environ is base with the variables of set applied over it, an empty value
 // removing the variable.
 func environ(base []string, set map[string]string) []string {

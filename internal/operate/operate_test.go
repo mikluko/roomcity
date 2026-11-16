@@ -359,12 +359,130 @@ func TestMarksOfASessionThatDiedWithoutAStopAreGoneAtItsNextStart(t *testing.T) 
 
 func TestAnOperationTheRuntimeDoesNotOfferAnswersUnknown(t *testing.T) {
 	f := newFixture(t, operate.Config{})
-	for _, op := range []string{"protocol", "peek", "interrupt", "send-keys", "attach", "exec", "get-last-activity"} {
+	for _, op := range []string{"attach", "exec", "copy-to", "check-image", "watch-startup", "provision"} {
 		r := f.do(op, "", "s")
 		require.Equal(t, int32(2), r.ExitCode, op)
 	}
 	require.Equal(t, int32(1), f.do("start", "{", "s").ExitCode)
 	require.Equal(t, "false", string(f.do("is-running", "", "never").Stdout))
+}
+
+func TestTheHandshakeDeclaresWhatTheRuntimeDoes(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	r := f.do("protocol", "")
+	require.Zero(t, r.ExitCode)
+	var hs struct {
+		Version      int      `json:"version"`
+		Capabilities []string `json:"capabilities"`
+	}
+	require.NoError(t, json.Unmarshal(r.Stdout, &hs))
+	require.Zero(t, hs.Version)
+	require.ElementsMatch(t, []string{"carrier.ops", "idle-boundary", "report-activity", "report-attachment"}, hs.Capabilities)
+}
+
+// startWithFrames starts a session whose pod reports no frames of its own but
+// the ones needed to be running, and returns it.
+func startRunning(t *testing.T, f *fixture, name string) {
+	t.Helper()
+	f.jobs.onCreate = func(spec operate.JobSpec) {
+		go func() {
+			_, err := f.reg.Report(f.ctx, spec.Session, []session.HostFrame{
+				{Seq: 1, Direction: session.ToAgent, Message: []byte(`{"jsonrpc":"2.0","id":1,"method":"session/new"}`)},
+				{Seq: 2, Direction: session.FromAgent, Message: []byte(`{"jsonrpc":"2.0","id":1,"result":{"sessionId":"x"}}`)},
+			})
+			require.NoError(t, err)
+		}()
+	}
+	require.Zero(t, f.do("start", f.startConfig(map[string]any{"nudge": ""}), name).ExitCode)
+}
+
+func TestPeekShowsTheScreenAndItsLastLineSaysWhetherATurnRuns(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+	report := func(seq uint64, d session.Direction, msg string) {
+		_, err := f.reg.Report(f.ctx, "w-1", []session.HostFrame{{Seq: seq, Direction: d, Message: []byte(msg)}})
+		require.NoError(t, err)
+	}
+	lastLine := func() string {
+		out := string(f.do("peek", "", "w-1", "120").Stdout)
+		return out[strings.LastIndex(out, "\n")+1:]
+	}
+
+	require.Equal(t, "❯ ", lastLine(), "idle: the ready prompt")
+
+	report(3, session.ToAgent, `{"jsonrpc":"2.0","id":7,"method":"session/prompt"}`)
+	report(4, session.FromAgent, `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working on it"}}}}`)
+	require.Contains(t, lastLine(), "esc to interrupt")
+	require.Contains(t, string(f.do("peek", "", "w-1", "120").Stdout), "working on it")
+
+	report(5, session.FromAgent, `{"jsonrpc":"2.0","method":"session/request_permission","id":"p1","params":{"toolCall":{"title":"Run ls"}}}`)
+	require.Contains(t, lastLine(), "esc to interrupt", "a turn that waits for a permission answer is not idle")
+
+	report(6, session.FromAgent, `{"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}}`)
+	require.Equal(t, "❯ ", lastLine())
+
+	require.Zero(t, f.do("set-meta", "$ ", "w-1", "GC_READY_PROMPT_PREFIX").ExitCode)
+	require.Equal(t, "$ ", lastLine(), "the prompt gc published")
+
+	one := string(f.do("peek", "", "w-1", "1").Stdout)
+	require.Equal(t, "$ ", one)
+	require.Equal(t, int32(1), f.do("peek", "", "nobody", "5").ExitCode)
+	require.Equal(t, int32(1), f.do("peek", "", "w-1", "many").ExitCode)
+}
+
+func TestThePeekOfASessionBeginsWithTheCommandItWasStartedWith(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+	out := string(f.do("peek", "", "w-1", "120").Stdout)
+	require.True(t, strings.HasPrefix(out, "$ claude --model sonnet --settings /city/.gc/agents/host/.roomcity/settings.json\n"), out)
+}
+
+func TestThePeekOfAProcessIsTheEndOfItsOutput(t *testing.T) {
+	m := &procs.Manager{LogDir: filepath.Join(t.TempDir(), "logs"), Grace: 500 * time.Millisecond}
+	f := newFixture(t, operate.Config{Processes: m, IsProcess: func(string) bool { return true }})
+	cfg := f.startConfig(map[string]any{"command": "echo one; echo two; echo three; sleep 30", "work_dir": f.dir})
+	require.Zero(t, f.do("start", cfg, "svc-1").ExitCode)
+	require.Eventually(t, func() bool { return strings.Contains(string(f.do("peek", "", "svc-1", "50").Stdout), "three") }, 5*time.Second, 20*time.Millisecond)
+	require.Equal(t, "two\nthree", string(f.do("peek", "", "svc-1", "2").Stdout))
+	require.Zero(t, f.do("stop", "", "svc-1").ExitCode)
+}
+
+func TestLastActivityIsTheTimeOfTheLatestFrame(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	require.Empty(t, f.do("get-last-activity", "", "nobody").Stdout)
+
+	startRunning(t, f, "w-1")
+	at := time.Date(2026, 11, 16, 7, 8, 9, 0, time.UTC)
+	_, err := f.reg.Report(f.ctx, "w-1", []session.HostFrame{{Seq: 3, Time: at, Direction: session.FromAgent, Message: []byte(`{"jsonrpc":"2.0","method":"session/update","params":{}}`)}})
+	require.NoError(t, err)
+	require.Equal(t, "2026-11-16T07:08:09Z", string(f.do("get-last-activity", "", "w-1").Stdout))
+}
+
+func TestInterruptAndTheKeysThatStopATurnCancelIt(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+	in, err := f.reg.Instructions(f.ctx, "w-1", 0)
+	require.NoError(t, err)
+
+	require.Zero(t, f.do("interrupt", "", "w-1").ExitCode)
+	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+	require.Zero(t, f.do("send-keys", "", "w-1", "Escape").ExitCode)
+	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+	require.Zero(t, f.do("send-keys", "", "w-1", "C-c").ExitCode)
+	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+
+	// Other keys are dropped, a session that is gone is no failure, and
+	// nobody is attached.
+	require.Zero(t, f.do("send-keys", "", "w-1", "Enter", "C-u").ExitCode)
+	require.Zero(t, f.do("interrupt", "", "nobody").ExitCode)
+	require.Zero(t, f.do("clear-scrollback", "", "w-1").ExitCode)
+	require.Equal(t, "false", string(f.do("is-attached", "", "w-1").Stdout))
+	require.Equal(t, "false", string(f.do("is-attached", "", "nobody").Stdout))
+	select {
+	case i := <-in:
+		t.Fatalf("an instruction no key asked for: %+v", i)
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func TestMetaOperations(t *testing.T) {

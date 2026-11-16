@@ -17,17 +17,17 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/serve"
 )
 
-// TestGcRuntimeCheck runs gc's own conformance check, "gc runtime check",
-// against the built command and a server on real listeners whose pods are
-// goroutines. It runs when ROOMCITY_GC names a gc, the image's for instance:
+// gcSuite runs one of gc's own conformance commands against the built
+// command and a server on real listeners whose pods are goroutines. It runs
+// when ROOMCITY_GC names a gc, the image's for instance:
 //
-//	ROOMCITY_GC=/usr/local/bin/gc go test ./internal/serve -run TestGcRuntimeCheck -v
-func TestGcRuntimeCheck(t *testing.T) {
+//	ROOMCITY_GC=/usr/local/bin/gc go test ./internal/serve -run TestGc -v
+func gcSuite(t *testing.T, command string) {
 	gc := os.Getenv("ROOMCITY_GC")
 	if gc == "" {
 		t.Skip("ROOMCITY_GC does not name a gc")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	bin := filepath.Join(t.TempDir(), "gc-runtime-room")
@@ -66,14 +66,18 @@ image = "roomcity"
 	served := make(chan error, 1)
 	go func() { served <- serve.Run(runCtx, serve.Options{Config: cfg, Listeners: ls, Jobs: j}) }()
 
-	check := exec.CommandContext(ctx, gc, "runtime", "check", bin)
+	check := exec.CommandContext(ctx, gc, "runtime", command, bin)
 	check.Env = append(os.Environ(), "ROOMCITY_RUNTIME_URL=http://"+ls.Runtime.Addr().String())
 	var out bytes.Buffer
 	check.Stdout, check.Stderr = &out, &out
 	err = check.Run()
-	t.Logf("gc runtime check:\n%s", out.String())
+	t.Logf("gc runtime %s:\n%s", command, out.String())
 	require.NoError(t, err)
 
 	stop()
 	require.NoError(t, <-served)
 }
+
+func TestGcRuntimeCheck(t *testing.T) { gcSuite(t, "check") }
+
+func TestGcRuntimeConformance(t *testing.T) { gcSuite(t, "conformance") }
