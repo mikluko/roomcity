@@ -34,6 +34,9 @@ const serverName = "test.local"
 func homeserver(t *testing.T) string {
 	t.Helper()
 	hs := os.Getenv("ROOMCITY_TEST_HOMESERVER")
+	if hs == "" && os.Getenv("ROOMCITY_TEST_REQUIRE_HOMESERVER") != "" {
+		t.Fatal("ROOMCITY_TEST_REQUIRE_HOMESERVER is set, so the homeserver is not optional: ROOMCITY_TEST_HOMESERVER is not")
+	}
 	if hs == "" {
 		t.Skip("ROOMCITY_TEST_HOMESERVER is not set: run scripts/tuwunel-test.sh up")
 	}

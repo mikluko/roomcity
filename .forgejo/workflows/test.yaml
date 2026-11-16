@@ -20,6 +20,15 @@ jobs:
           go-version-file: go.mod
       - run: go install "$BUF"
       - run: make lint
+      # The Matrix driver's tests need a homeserver. The runner has no Docker
+      # daemon, so Tuwunel's own binary, which is static, is fetched and run as
+      # a process of the job; the tests then find it by the variables the script
+      # prints, and fail rather than skip if they do not.
+      - name: Start a Tuwunel for the Matrix driver's tests
+        run: |
+          bin=$(scripts/fetch-tuwunel.sh "${RUNNER_TEMP:-/tmp}/tuwunel")
+          scripts/tuwunel-test.sh run "$bin" >> "$GITHUB_ENV"
+          echo "ROOMCITY_TEST_REQUIRE_HOMESERVER=1" >> "$GITHUB_ENV"
       - run: make test
       - name: Check that internal/gen is what proto/ generates
         run: |
