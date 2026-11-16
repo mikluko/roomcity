@@ -64,7 +64,7 @@ func (h *host) take(ctx context.Context, in *roomcityv1.AttachResponse) {
 	case *roomcityv1.AttachResponse_Prompt:
 		h.prompt(ctx, in.Seq, i.Prompt)
 	case *roomcityv1.AttachResponse_Cancel:
-		h.cancel(ctx)
+		h.cancel(ctx, i.Cancel.GetKeepWaiting())
 	case *roomcityv1.AttachResponse_PermissionAnswer:
 		h.answer(i.PermissionAnswer)
 	case *roomcityv1.AttachResponse_Stop:
@@ -158,15 +158,17 @@ func (h *host) turns(ctx context.Context) {
 	}
 }
 
-// cancel ends the running turn, drops the owner's prompts waiting behind it,
-// and answers every open permission request as cancelled, as ACP asks of the
-// client that cancels. The prompts gc sent stay in the queue and run, in
-// order, once the turn has stopped.
-func (h *host) cancel(ctx context.Context) {
+// cancel ends the running turn, drops the owner's prompts waiting behind it
+// unless keepWaiting says to drop nothing, and answers every open permission
+// request as cancelled, as ACP asks of the client that cancels. The prompts
+// that stay in the queue run, in order, once the turn has stopped.
+func (h *host) cancel(ctx context.Context, keepWaiting bool) {
 	h.mu.Lock()
-	h.prompts = slices.DeleteFunc(h.prompts, func(q queued) bool {
-		return q.source != roomcityv1.PromptSource_PROMPT_SOURCE_GC
-	})
+	if !keepWaiting {
+		h.prompts = slices.DeleteFunc(h.prompts, func(q queued) bool {
+			return q.source != roomcityv1.PromptSource_PROMPT_SOURCE_GC
+		})
+	}
 	sid := h.sid
 	for _, ch := range h.pending {
 		select {

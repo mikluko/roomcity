@@ -631,3 +631,66 @@ func TestTailReturnsTheLastEventsInOrder(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, evs, 6)
 }
+
+func TestAnInterruptDropsNothingAndLeavesTheOwnersPromptsOpen(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "owner waits"})
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "gc waits")
+	require.NoError(t, err)
+	require.NoError(t, r.Interrupt(ctx, "s"))
+
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, "owner waits", recv(t, in).Text)
+	require.Equal(t, "gc waits", recv(t, in).Text)
+	cancel := recv(t, in)
+	require.Equal(t, session.Instruction{Seq: 3, Kind: session.InstructionCancel, KeepWaiting: true}, cancel)
+
+	evs, err := r.Subscribe(ctx, "s", 0)
+	require.NoError(t, err)
+	for range 3 { // started and the two stored prompts, and nothing more
+		e := recv(t, evs)
+		if p, ok := e.(session.Prompt); ok {
+			require.Equal(t, session.Stored, p.State)
+		}
+	}
+	select {
+	case e := <-evs:
+		t.Fatalf("an interrupt closed a record: %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStopClosesTheRecordOfEveryOwnersPromptThatWaitsAndOnlyThose(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	first, err := r.Prompt(ctx, "s", session.PromptInput{Text: "taken"})
+	require.NoError(t, err)
+	waits, err := r.Prompt(ctx, "s", session.PromptInput{Text: "waits"})
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "gc waits")
+	require.NoError(t, err)
+	// The host took the first prompt into a turn: its record is closed.
+	require.NoError(t, r.Handled(ctx, "s", 1, session.BeganTurn))
+
+	require.NoError(t, r.Cancel(ctx, "s"))
+	require.NoError(t, r.Cancel(ctx, "s"))
+
+	evs, err := r.Tail(ctx, "s", 100)
+	require.NoError(t, err)
+	var closed []session.Prompt
+	for _, e := range evs {
+		if p, ok := e.(session.Prompt); ok && p.State == session.Dropped {
+			closed = append(closed, p)
+		}
+	}
+	require.Len(t, closed, 1, "the prompt that waited, once, though Cancel ran twice: %+v", closed)
+	require.Equal(t, session.Prompt{Seq: closed[0].Seq, Source: session.FromOwner, Text: "waits", State: session.Dropped, Of: waits}, closed[0])
+	require.NotEqual(t, first, closed[0].Of)
+}

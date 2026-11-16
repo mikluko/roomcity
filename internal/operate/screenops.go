@@ -101,10 +101,11 @@ func (o *Operator) lastActivity(ctx context.Context, name string) result {
 	return ok(act.Last.UTC().Format(time.RFC3339))
 }
 
-// interrupt ends the running turn, as the owner's !stop does. gc asks it of a
+// interrupt ends the running turn and drops nothing: what waits runs after
+// it, the owner's first, which the owner's !stop does not do. gc asks it of a
 // session that may not exist, and that is no failure.
 func (o *Operator) interrupt(ctx context.Context, name string) result {
-	err := o.reg.Cancel(ctx, name)
+	err := o.reg.Interrupt(ctx, name)
 	if err != nil && !errors.Is(err, session.ErrNotFound) && !errors.Is(err, session.ErrNotRunning) {
 		return failf("interrupt %s: %v", name, err)
 	}

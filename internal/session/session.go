@@ -98,6 +98,10 @@ const (
 	// Delivered is a prompt the server handed to the session host; what the
 	// host did with it is not reported back.
 	Delivered
+	// Dropped closes the record of a prompt of the owner's that waited and
+	// was dropped by the owner's !stop: it will not be delivered. Its Of is
+	// the Seq of the Stored record.
+	Dropped
 )
 
 // Prompt records a prompt at each state it reaches, a Stored record first
@@ -176,8 +180,9 @@ type Service interface {
 	// started yet ErrNotFound.
 	Prompt(ctx context.Context, name string, in PromptInput) (uint64, error)
 	// Cancel is the server's whole share of !stop: it ends the running turn,
-	// drops the owner's prompts that wait, keeps gc's nudges that wait and
-	// withdraws an open permission request.
+	// drops the owner's prompts that wait, each closed with a Dropped
+	// record, keeps gc's nudges that wait and withdraws an open permission
+	// request.
 	Cancel(ctx context.Context, name string) error
 	// AnswerPermission queues the answer to the agent's permission request
 	// requestID: the option chosen, or "" to cancel the request.

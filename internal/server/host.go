@@ -80,7 +80,7 @@ func instruction(i session.Instruction) *roomcityv1.AttachResponse {
 			IntoTurn: i.Source != session.FromGC,
 		}}
 	case session.InstructionCancel:
-		out.Instruction = &roomcityv1.AttachResponse_Cancel{Cancel: &roomcityv1.Cancel{}}
+		out.Instruction = &roomcityv1.AttachResponse_Cancel{Cancel: &roomcityv1.Cancel{KeepWaiting: i.KeepWaiting}}
 	case session.InstructionPermissionAnswer:
 		out.Instruction = &roomcityv1.AttachResponse_PermissionAnswer{PermissionAnswer: &roomcityv1.PermissionAnswer{RequestId: i.RequestID, OptionId: i.OptionID}}
 	case session.InstructionStop:

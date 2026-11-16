@@ -141,3 +141,19 @@ func TestHostStageSendsTheBundleInPieces(t *testing.T) {
 	require.Equal(t, archive, got)
 	require.Greater(t, pieces, 1)
 }
+
+func TestAnInterruptReachesTheHostAsACancelThatKeepsWhatWaits(t *testing.T) {
+	f := newHostFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, f.reg.Interrupt(ctx, "s"))
+	require.NoError(t, f.reg.Cancel(ctx, "s"))
+
+	stream, err := f.client.Attach(ctx, connect.NewRequest(&roomcityv1.AttachRequest{Session: "s"}))
+	require.NoError(t, err)
+	require.True(t, stream.Receive())
+	require.True(t, stream.Msg().GetCancel().GetKeepWaiting(), "gc's interrupt")
+	require.True(t, stream.Receive())
+	require.NotNil(t, stream.Msg().GetCancel())
+	require.False(t, stream.Msg().GetCancel().GetKeepWaiting(), "the owner's !stop")
+}

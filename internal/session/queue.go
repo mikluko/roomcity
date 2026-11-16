@@ -56,6 +56,9 @@ const (
 type Instruction struct {
 	Seq  uint64
 	Kind InstructionKind
+	// KeepWaiting is set for a cancellation that drops nothing: gc's
+	// interrupt, not the owner's !stop.
+	KeepWaiting bool
 	// Source and Text are set for a prompt.
 	Source Source
 	Text   string
@@ -93,9 +96,9 @@ func (r *Registry) enqueue(tx *sql.Tx, name string, in Instruction, eventSeq uin
 		return err
 	}
 	_, err := tx.Exec(`
-		INSERT INTO instructions (session, seq, kind, source, text, request_id, option_id, event_seq)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		name, seq, in.Kind, in.Source, in.Text, in.RequestID, in.OptionID, eventSeq)
+		INSERT INTO instructions (session, seq, kind, source, text, request_id, option_id, event_seq, keep_waiting)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, seq, in.Kind, in.Source, in.Text, in.RequestID, in.OptionID, eventSeq, in.KeepWaiting)
 	return err
 }
 
@@ -144,6 +147,9 @@ func (r *Registry) Nudge(ctx context.Context, name, text string) (uint64, error)
 // so that they reach the host after the turn has stopped.
 func (r *Registry) Cancel(ctx context.Context, name string) error {
 	return r.queueControl(ctx, func(tx *sql.Tx) error {
+		if err := r.dropOwnersPrompts(tx, name); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`DELETE FROM instructions WHERE session = ? AND kind = ? AND source = ? AND sent = 0`, name, InstructionPrompt, FromOwner); err != nil {
 			return err
 		}
@@ -164,6 +170,52 @@ func (r *Registry) Cancel(ctx context.Context, name string) error {
 		}
 		return nil
 	})
+}
+
+// Interrupt is gc's interrupt: it ends the running turn and drops nothing.
+// Every prompt that waits, the owner's and gc's, stays queued and runs after
+// the turn has stopped, the owner's first.
+func (r *Registry) Interrupt(ctx context.Context, name string) error {
+	return r.queueControl(ctx, func(tx *sql.Tx) error {
+		return r.enqueue(tx, name, Instruction{Kind: InstructionCancel, KeepWaiting: true}, 0)
+	})
+}
+
+// dropOwnersPrompts closes the record of each prompt of the owner's that has
+// neither been delivered nor dropped, with a Dropped record, so that whoever
+// shows it as waiting can stop. The host drops those it holds as the server
+// those it has not sent.
+func (r *Registry) dropOwnersPrompts(tx *sql.Tx, name string) error {
+	rows, err := tx.Query(`
+		SELECT e.seq, e.text FROM events e
+		WHERE e.session = ? AND e.kind = ? AND e.source = ? AND e.pstate = ?
+		  AND NOT EXISTS (SELECT 1 FROM events x
+		                  WHERE x.session = e.session AND x.kind = ? AND x.of = e.seq AND x.pstate IN (?, ?))
+		ORDER BY e.seq`,
+		name, eventPrompt, FromOwner, Stored, eventPrompt, Delivered, Dropped)
+	if err != nil {
+		return err
+	}
+	var open []waitingNudge
+	for rows.Next() {
+		var w waitingNudge
+		if err := rows.Scan(&w.eventSeq, &w.text); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		open = append(open, w)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, w := range open {
+		if _, err := r.appendEvent(tx, name, Prompt{Source: FromOwner, Text: w.text, State: Dropped, Of: w.eventSeq}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type waitingNudge struct {
@@ -323,7 +375,7 @@ type pendingInstruction struct {
 
 func (r *Registry) pending(ctx context.Context, name string, after uint64) ([]pendingInstruction, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT seq, kind, source, text, request_id, option_id, event_seq, sent
+		SELECT seq, kind, source, text, request_id, option_id, event_seq, sent, keep_waiting
 		FROM instructions WHERE session = ? AND seq > ? ORDER BY seq`, name, after)
 	if err != nil {
 		return nil, err
@@ -332,7 +384,7 @@ func (r *Registry) pending(ctx context.Context, name string, after uint64) ([]pe
 	var out []pendingInstruction
 	for rows.Next() {
 		var p pendingInstruction
-		if err := rows.Scan(&p.Seq, &p.Kind, &p.Source, &p.Text, &p.RequestID, &p.OptionID, &p.eventSeq, &p.sent); err != nil {
+		if err := rows.Scan(&p.Seq, &p.Kind, &p.Source, &p.Text, &p.RequestID, &p.OptionID, &p.eventSeq, &p.sent, &p.KeepWaiting); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -378,7 +430,8 @@ const (
 
 // Handled records what the host did with the prompt instruction of that
 // number: Steered and BeganTurn make it Delivered, Queued makes it Waiting. A
-// prompt is Delivered once and is not Waiting after it, so a report that
+// prompt is Delivered once, is not Waiting after it and is neither after it
+// was Dropped, so a report that
 // comes again, or late, changes nothing. A number that names no prompt is
 // ErrNotFound.
 func (r *Registry) Handled(ctx context.Context, name string, instruction uint64, h Handling) error {
@@ -400,8 +453,8 @@ func (r *Registry) Handled(ctx context.Context, name string, instruction uint64,
 			state = Waiting
 		}
 		var seen int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE session = ? AND kind = ? AND of = ? AND pstate IN (?, ?)`,
-			name, eventPrompt, of, Delivered, state).Scan(&seen); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE session = ? AND kind = ? AND of = ? AND pstate IN (?, ?, ?)`,
+			name, eventPrompt, of, Delivered, Dropped, state).Scan(&seen); err != nil {
 			return err
 		}
 		if seen > 0 {

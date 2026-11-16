@@ -62,8 +62,13 @@ enum PromptSource {
   PROMPT_SOURCE_GC = 2;
 }
 
-// Cancel ends the running turn, as ACP's session/cancel does.
-message Cancel {}
+// Cancel ends the running turn, as ACP's session/cancel does. The owner's
+// !stop also drops the owner's prompts that wait; gc's interrupt does not.
+message Cancel {
+  // keep_waiting says to drop nothing: every prompt that waits stays queued
+  // and runs once the turn has stopped, the owner's first.
+  bool keep_waiting = 1;
+}
 
 // PermissionAnswer answers one session/request_permission of the agent.
 message PermissionAnswer {

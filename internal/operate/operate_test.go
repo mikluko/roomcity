@@ -465,11 +465,11 @@ func TestInterruptAndTheKeysThatStopATurnCancelIt(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Zero(t, f.do("interrupt", "", "w-1").ExitCode)
-	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+	requireInterrupt(t, <-in)
 	require.Zero(t, f.do("send-keys", "", "w-1", "Escape").ExitCode)
-	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+	requireInterrupt(t, <-in)
 	require.Zero(t, f.do("send-keys", "", "w-1", "C-c").ExitCode)
-	require.Equal(t, session.InstructionCancel, (<-in).Kind)
+	requireInterrupt(t, <-in)
 
 	// Other keys are dropped, a session that is gone is no failure, and
 	// nobody is attached.
@@ -566,4 +566,12 @@ func TestAServiceThatEndsOnItsOwnCanBeStartedAgain(t *testing.T) {
 	require.Zero(t, f.do("start", cfg, "svc-1").ExitCode)
 	require.Eventually(t, func() bool { return string(f.do("is-running", "", "svc-1").Stdout) == "false" }, 5*time.Second, 20*time.Millisecond)
 	require.Zero(t, f.do("start", cfg, "svc-1").ExitCode)
+}
+
+// requireInterrupt checks that i is gc's interrupt: a cancellation that drops
+// nothing.
+func requireInterrupt(t *testing.T, i session.Instruction) {
+	t.Helper()
+	require.Equal(t, session.InstructionCancel, i.Kind)
+	require.True(t, i.KeepWaiting, "gc's interrupt keeps what waits")
 }

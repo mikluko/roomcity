@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS instructions (
 	request_id TEXT NOT NULL DEFAULT '',
 	option_id  TEXT NOT NULL DEFAULT '',
 	event_seq  INTEGER NOT NULL DEFAULT 0,
+	keep_waiting INTEGER NOT NULL DEFAULT 0,
 	sent       INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session, seq)
 );

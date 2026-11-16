@@ -110,8 +110,8 @@ func fromAgent(message []byte) (chunk, line string) {
 		Method string `json:"method"`
 		Params struct {
 			Update struct {
-				Kind    string `json:"sessionUpdate"`
-				Title   string `json:"title"`
+				Kind  string `json:"sessionUpdate"`
+				Title string `json:"title"`
 				// Content is an object for a chunk of the agent's words and a
 				// list for a tool call: it is read only where it is the former.
 				Content json.RawMessage `json:"content"`

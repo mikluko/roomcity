@@ -421,9 +421,13 @@ func (x *Prompt) GetIntoTurn() bool {
 	return false
 }
 
-// Cancel ends the running turn, as ACP's session/cancel does.
+// Cancel ends the running turn, as ACP's session/cancel does. The owner's
+// !stop also drops the owner's prompts that wait; gc's interrupt does not.
 type Cancel struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// keep_waiting says to drop nothing: every prompt that waits stays queued
+	// and runs once the turn has stopped, the owner's first.
+	KeepWaiting   bool `protobuf:"varint,1,opt,name=keep_waiting,json=keepWaiting,proto3" json:"keep_waiting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -456,6 +460,13 @@ func (x *Cancel) ProtoReflect() protoreflect.Message {
 // Deprecated: Use Cancel.ProtoReflect.Descriptor instead.
 func (*Cancel) Descriptor() ([]byte, []int) {
 	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Cancel) GetKeepWaiting() bool {
+	if x != nil {
+		return x.KeepWaiting
+	}
+	return false
 }
 
 // PermissionAnswer answers one session/request_permission of the agent.
@@ -1050,8 +1061,9 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\x06Prompt\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x121\n" +
 	"\x06source\x18\x02 \x01(\x0e2\x19.roomcity.v1.PromptSourceR\x06source\x12\x1b\n" +
-	"\tinto_turn\x18\x03 \x01(\bR\bintoTurn\"\b\n" +
-	"\x06Cancel\"N\n" +
+	"\tinto_turn\x18\x03 \x01(\bR\bintoTurn\"+\n" +
+	"\x06Cancel\x12!\n" +
+	"\fkeep_waiting\x18\x01 \x01(\bR\vkeepWaiting\"N\n" +
 	"\x10PermissionAnswer\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
