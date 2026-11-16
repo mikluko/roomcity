@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated: maunium.net/go/mautrix v0.33.0.
+
 ### Fixed
 
 - A session that ends or starts afresh closes every queued or held prompt as dropped, gc's nudges included, clearing the room's ⏳.
