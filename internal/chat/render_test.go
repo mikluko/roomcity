@@ -427,6 +427,19 @@ func TestRendererKeepsTheMarkOfGcsNudgeWhenTheOwnerStops(t *testing.T) {
 	require.Equal(t, []ReactionID{"r1"}, out.undone)
 }
 
+func TestRendererClearsGcsNudgeMarkWhenTheSessionEndDropsIt(t *testing.T) {
+	r, out, _ := newTestRenderer()
+	r.event(session.Prompt{Seq: 4, Source: session.FromGC, Text: "nudge", State: session.Stored})
+	r.event(session.Prompt{Seq: 5, State: session.Waiting, Of: 4})
+	require.Equal(t, []string{"m1 ⏳"}, out.reactions)
+
+	r.event(session.Prompt{Seq: 6, Source: session.FromGC, State: session.Dropped, Of: 4})
+	require.Equal(t, []ReactionID{"r1"}, out.undone, "a gc nudge's ⏳ goes with its Dropped record, as an owner's does")
+	require.Equal(t, []uint64{4}, out.forgotten)
+	r.event(session.Lifecycle{Seq: 7, Kind: session.Stopped})
+	require.Equal(t, []ReactionID{"r1"}, out.undone)
+}
+
 func TestRendererShowsTheOutputOfAFailedToolCall(t *testing.T) {
 	r, out, _ := newTestRenderer()
 	r.event(update("tool_call", `"toolCallId":"t1","title":"Run it","status":"pending","rawInput":{"command":"x"}`))

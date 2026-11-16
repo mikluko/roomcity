@@ -249,9 +249,9 @@ func (r *Registry) StartWith(ctx context.Context, name, agent string, kind Kind,
 			return err
 		}
 		if lk == StartedAfresh {
-			// The queue is emptied below: what the owner wrote and had not
-			// seen taken is dropped with it, and its record closed.
-			if err := r.dropOwnersPrompts(tx, name); err != nil {
+			// The queue is emptied below: every prompt not seen taken is
+			// dropped with it, and its record closed.
+			if err := r.dropPrompts(tx, name, 0); err != nil {
 				return err
 			}
 		}
@@ -328,9 +328,9 @@ func (r *Registry) EndAs(ctx context.Context, name, how string) error {
 		if err := r.setState(tx, name, Ended); err != nil {
 			return err
 		}
-		// An ended session delivers nothing more: the owner's prompts that
-		// waited are dropped, and their records closed.
-		if err := r.dropOwnersPrompts(tx, name); err != nil {
+		// An ended session delivers nothing more: every prompt that waited is
+		// dropped, and its record closed.
+		if err := r.dropPrompts(tx, name, 0); err != nil {
 			return err
 		}
 		seq, err := r.appendEvent(tx, name, Lifecycle{Kind: Stopped})

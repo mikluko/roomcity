@@ -102,16 +102,16 @@ const (
 	// Delivered is a prompt the server handed to the session host; what the
 	// host did with it is not reported back.
 	Delivered
-	// Dropped closes the record of a prompt of the owner's that waited and
-	// was dropped by the owner's !stop: it will not be delivered. Its Of is
-	// the Seq of the Stored record.
+	// Dropped closes the record of a prompt that will not be delivered: one
+	// dropped by the owner's !stop, or one still waiting when its session
+	// ends or starts afresh. Its Of is the Seq of the Stored record.
 	Dropped
 )
 
 // Prompt records a prompt at each state it reaches, a Stored record first
-// and a Delivered one last, so that the chat side can tell a prompt that
-// waits from one the agent has taken. The frame that carries the prompt to
-// the agent comes in the stream as well.
+// and a Delivered or Dropped one last, so that the chat side can tell a prompt
+// that waits from one the agent has taken. The frame that carries the prompt
+// to the agent comes in the stream as well.
 type Prompt struct {
 	Seq uint64
 	// Time is when the server recorded it.
@@ -119,7 +119,7 @@ type Prompt struct {
 	Source Source
 	Text   string
 	State  PromptState
-	// Of is, for a Waiting or Delivered record, the Seq of the Stored
+	// Of is, for a Waiting, Delivered or Dropped record, the Seq of the Stored
 	// record of the same prompt, which Service.Prompt returned for the
 	// owner's; else 0.
 	Of uint64

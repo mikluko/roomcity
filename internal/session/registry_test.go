@@ -710,40 +710,120 @@ func TestStopClosesTheRecordOfEveryOwnersPromptThatWaitsAndOnlyThose(t *testing.
 	require.NotEqual(t, first, closed[0].Of)
 }
 
-func TestAStartAfreshAndAnEndCloseTheRecordsOfTheOwnersPromptsThatWaited(t *testing.T) {
+func TestSessionEndDropsHeldAndQueuedPromptsOnce(t *testing.T) {
 	ctx := ctxT(t)
 	r := open(t, filepath.Join(t.TempDir(), "r.db"))
-	dropped := func(name string) []string {
-		evs, err := r.Tail(ctx, name, 100)
-		require.NoError(t, err)
-		var texts []string
-		for _, e := range evs {
-			if p, ok := e.(session.Prompt); ok && p.State == session.Dropped {
-				texts = append(texts, p.Text)
-			}
-		}
-		return texts
-	}
-
 	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
 	require.NoError(t, err)
-	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "waits for the start"})
+	delivered, err := r.Nudge(ctx, "s", "delivered")
 	require.NoError(t, err)
-	_, err = r.Nudge(ctx, "s", "gc's, which is dropped as well, and has no record to close")
+	held, err := r.Nudge(ctx, "s", "held")
 	require.NoError(t, err)
-	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	queued, err := r.Nudge(ctx, "s", "queued")
 	require.NoError(t, err)
-	require.Equal(t, []string{"waits for the start"}, dropped("s"))
+	require.NoError(t, r.Handled(ctx, "s", 1, session.BeganTurn))
+	require.NoError(t, r.Handled(ctx, "s", 2, session.Queued))
 
-	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "waits for the end"})
+	require.NoError(t, r.End(ctx, "s"))
+	require.NoError(t, r.End(ctx, "s"), "a repeated end closes nothing again")
+
+	evs, err := r.Tail(ctx, "s", 100)
+	require.NoError(t, err)
+	var dropped, deliveredRecords []session.Prompt
+	for _, e := range evs {
+		p, ok := e.(session.Prompt)
+		if !ok {
+			continue
+		}
+		if p.State == session.Dropped {
+			dropped = append(dropped, untimed(p))
+		}
+		if p.Of == delivered {
+			deliveredRecords = append(deliveredRecords, p)
+		}
+	}
+	require.Len(t, dropped, 2)
+	require.Equal(t, []session.Prompt{
+		{Seq: dropped[0].Seq, Source: session.FromGC, Text: "held", State: session.Dropped, Of: held},
+		{Seq: dropped[1].Seq, Source: session.FromGC, Text: "queued", State: session.Dropped, Of: queued},
+	}, dropped)
+	require.Len(t, deliveredRecords, 1)
+	require.Equal(t, session.Delivered, deliveredRecords[0].State)
+}
+
+func TestSessionEndWithoutAWaitingPromptAddsNoPromptRecord(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
 	require.NoError(t, err)
 	require.NoError(t, r.End(ctx, "s"))
-	require.Equal(t, []string{"waits for the start", "waits for the end"}, dropped("s"))
 
-	// The first start of a name has nothing to drop.
-	_, err = r.Start(ctx, "new", "host", session.AlwaysOn)
+	evs, err := r.Tail(ctx, "s", 100)
 	require.NoError(t, err)
-	require.Empty(t, dropped("new"))
+	for _, e := range evs {
+		_, ok := e.(session.Prompt)
+		require.False(t, ok, "an end with nothing waiting recorded a prompt: %+v", e)
+	}
+}
+
+func TestEveryWayOfEndingDropsGcsWaitingPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		end  func(context.Context, *session.Registry) error
+	}{
+		{"end", func(ctx context.Context, r *session.Registry) error {
+			return r.End(ctx, "s")
+		}},
+		{"failed end", func(ctx context.Context, r *session.Registry) error {
+			return r.EndAs(ctx, "s", session.HowFailed)
+		}},
+		{"lost end", func(ctx context.Context, r *session.Registry) error {
+			return r.EndAs(ctx, "s", session.HowLost)
+		}},
+		{"start afresh", func(ctx context.Context, r *session.Registry) error {
+			_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+			return err
+		}},
+		{"reset then end", func(ctx context.Context, r *session.Registry) error {
+			if err := r.Reset(ctx, "s"); err != nil {
+				return err
+			}
+			return r.End(ctx, "s")
+		}},
+		{"reset then start afresh", func(ctx context.Context, r *session.Registry) error {
+			if err := r.Reset(ctx, "s"); err != nil {
+				return err
+			}
+			_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := ctxT(t)
+			r := open(t, filepath.Join(t.TempDir(), "r.db"))
+			r.SetResetter(func(context.Context, string) error { return nil })
+			_, err := r.StartWith(ctx, "s", "host", session.AlwaysOn, session.StartInfo{GCID: "gc-1"})
+			require.NoError(t, err)
+			waiting, err := r.Nudge(ctx, "s", "gc waits")
+			require.NoError(t, err)
+			require.NoError(t, r.Handled(ctx, "s", 1, session.Queued))
+
+			require.NoError(t, tt.end(ctx, r))
+
+			evs, err := r.Tail(ctx, "s", 100)
+			require.NoError(t, err)
+			var dropped []session.Prompt
+			for _, e := range evs {
+				if p, ok := e.(session.Prompt); ok && p.State == session.Dropped {
+					dropped = append(dropped, p)
+				}
+			}
+			require.Len(t, dropped, 1)
+			require.Equal(t, waiting, dropped[0].Of)
+			require.Equal(t, session.FromGC, dropped[0].Source)
+		})
+	}
 }
 
 func TestAStartsIdentityIsKeptAsMarksAndTheOnesGcStampsMove(t *testing.T) {

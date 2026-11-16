@@ -147,7 +147,7 @@ func (r *Registry) Nudge(ctx context.Context, name, text string) (uint64, error)
 // so that they reach the host after the turn has stopped.
 func (r *Registry) Cancel(ctx context.Context, name string) error {
 	return r.queueControl(ctx, func(tx *sql.Tx) error {
-		if err := r.dropOwnersPrompts(tx, name); err != nil {
+		if err := r.dropPrompts(tx, name, FromOwner); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM instructions WHERE session = ? AND kind = ? AND source = ? AND sent = 0`, name, InstructionPrompt, FromOwner); err != nil {
@@ -181,25 +181,27 @@ func (r *Registry) Interrupt(ctx context.Context, name string) error {
 	})
 }
 
-// dropOwnersPrompts closes the record of each prompt of the owner's that has
-// neither been delivered nor dropped, with a Dropped record, so that whoever
-// shows it as waiting can stop. The host drops those it holds as the server
+// dropPrompts closes the record of each prompt that has neither been
+// delivered nor dropped, with a Dropped record, so that whoever shows it as
+// waiting can stop. A nonzero source limits it to that source; zero closes
+// both the owner's and gc's. The host drops those it holds as the server
 // those it has not sent.
-func (r *Registry) dropOwnersPrompts(tx *sql.Tx, name string) error {
+func (r *Registry) dropPrompts(tx *sql.Tx, name string, source Source) error {
 	rows, err := tx.Query(`
-		SELECT e.seq, e.text FROM events e
-		WHERE e.session = ? AND e.kind = ? AND e.source = ? AND e.pstate = ?
+		SELECT e.seq, e.text, e.source FROM events e
+		WHERE e.session = ? AND e.kind = ? AND e.pstate = ?
+		  AND (? = 0 OR e.source = ?)
 		  AND NOT EXISTS (SELECT 1 FROM events x
 		                  WHERE x.session = e.session AND x.kind = ? AND x.of = e.seq AND x.pstate IN (?, ?))
 		ORDER BY e.seq`,
-		name, eventPrompt, FromOwner, Stored, eventPrompt, Delivered, Dropped)
+		name, eventPrompt, Stored, source, source, eventPrompt, Delivered, Dropped)
 	if err != nil {
 		return err
 	}
 	var open []waitingNudge
 	for rows.Next() {
 		var w waitingNudge
-		if err := rows.Scan(&w.eventSeq, &w.text); err != nil {
+		if err := rows.Scan(&w.eventSeq, &w.text, &w.source); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -211,7 +213,7 @@ func (r *Registry) dropOwnersPrompts(tx *sql.Tx, name string) error {
 	}
 	_ = rows.Close()
 	for _, w := range open {
-		if _, err := r.appendEvent(tx, name, Prompt{Source: FromOwner, Text: w.text, State: Dropped, Of: w.eventSeq}); err != nil {
+		if _, err := r.appendEvent(tx, name, Prompt{Source: w.source, Text: w.text, State: Dropped, Of: w.eventSeq}); err != nil {
 			return err
 		}
 	}
@@ -221,6 +223,7 @@ func (r *Registry) dropOwnersPrompts(tx *sql.Tx, name string) error {
 type waitingNudge struct {
 	text     string
 	eventSeq uint64
+	source   Source
 }
 
 // waitingNudges returns the nudges of gc not yet sent to the host, in the
