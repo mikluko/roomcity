@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -333,6 +334,97 @@ func TestCancelDropsPromptsNotYetSent(t *testing.T) {
 	require.Equal(t, session.InstructionCancel, recv(t, in).Kind)
 	answer := recv(t, in)
 	require.Equal(t, session.Instruction{Seq: 3, Kind: session.InstructionPermissionAnswer, RequestID: "7", OptionID: "allow"}, answer)
+}
+
+func TestCancelKeepsGcsNudgesThatWaitInTheirOrder(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	for _, p := range []struct {
+		nudge bool
+		text  string
+	}{{true, "gc 1"}, {false, "owner 1"}, {true, "gc 2"}, {false, "owner 2"}} {
+		if p.nudge {
+			_, err = r.Nudge(ctx, "s", p.text)
+		} else {
+			_, err = r.Prompt(ctx, "s", session.PromptInput{Text: p.text})
+		}
+		require.NoError(t, err)
+	}
+	require.NoError(t, r.Cancel(ctx, "s"))
+
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	var got []string
+	for range 3 {
+		i := recv(t, in)
+		if i.Kind == session.InstructionCancel {
+			got = append(got, "cancel")
+		} else {
+			got = append(got, i.Text)
+		}
+	}
+	require.Equal(t, []string{"cancel", "gc 1", "gc 2"}, got)
+}
+
+func TestACancelBetweenTheReadAndTheSendTakesTheNudgeOutOfTheStream(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "gc waits")
+	require.NoError(t, err)
+
+	// The stream has read the nudge as instruction 1; a Cancel moves it
+	// behind itself (cancel 2, nudge 3) before the stream sends.
+	read, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	restore := session.SetAfterPending(func() {
+		once.Do(func() {
+			close(read)
+			<-release
+		})
+	})
+	defer restore()
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	<-read
+	require.NoError(t, r.Cancel(ctx, "s"))
+	close(release)
+
+	var got []session.Instruction
+	for range 2 {
+		got = append(got, recv(t, in))
+	}
+	require.Equal(t, session.InstructionCancel, got[0].Kind)
+	require.Equal(t, uint64(2), got[0].Seq)
+	require.Equal(t, session.Instruction{Seq: 3, Kind: session.InstructionPrompt, Source: session.FromGC, Text: "gc waits"}, got[1])
+	select {
+	case again := <-in:
+		t.Fatalf("the nudge went to the host twice: %+v", again)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestAHostThatAttachesAgainFromAnEarlierNumberGetsWhatItWasSent(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	for _, text := range []string{"a", "b"} {
+		_, err = r.Nudge(ctx, "s", text)
+		require.NoError(t, err)
+	}
+	first, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, "a", recv(t, first).Text)
+	require.Equal(t, "b", recv(t, first).Text)
+
+	again, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, "a", recv(t, again).Text)
+	require.Equal(t, "b", recv(t, again).Text)
 }
 
 func TestStartAfreshEmptiesTheQueue(t *testing.T) {

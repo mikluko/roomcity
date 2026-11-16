@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -136,16 +137,57 @@ func (r *Registry) Nudge(ctx context.Context, name, text string) (uint64, error)
 	return r.queuePrompt(ctx, name, FromGC, text)
 }
 
-// Cancel implements Service: it drops the prompts not yet sent to the host
-// and queues the cancellation, which the host carries out as ACP's
-// session/cancel, withdrawing an open permission request with it.
+// Cancel implements Service: it drops the owner's prompts not yet sent to
+// the host and queues the cancellation, which the host carries out as ACP's
+// session/cancel, withdrawing an open permission request with it. gc's
+// nudges that wait are queued again behind the cancellation, in their order,
+// so that they reach the host after the turn has stopped.
 func (r *Registry) Cancel(ctx context.Context, name string) error {
 	return r.queueControl(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM instructions WHERE session = ? AND kind = ? AND source = ? AND sent = 0`, name, InstructionPrompt, FromOwner); err != nil {
+			return err
+		}
+		kept, err := r.waitingNudges(tx, name)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`DELETE FROM instructions WHERE session = ? AND kind = ? AND sent = 0`, name, InstructionPrompt); err != nil {
 			return err
 		}
-		return r.enqueue(tx, name, Instruction{Kind: InstructionCancel}, 0)
+		if err := r.enqueue(tx, name, Instruction{Kind: InstructionCancel}, 0); err != nil {
+			return err
+		}
+		for _, k := range kept {
+			if err := r.enqueue(tx, name, Instruction{Kind: InstructionPrompt, Source: FromGC, Text: k.text}, k.eventSeq); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+}
+
+type waitingNudge struct {
+	text     string
+	eventSeq uint64
+}
+
+// waitingNudges returns the nudges of gc not yet sent to the host, in the
+// order they were queued.
+func (r *Registry) waitingNudges(tx *sql.Tx, name string) ([]waitingNudge, error) {
+	rows, err := tx.Query(`SELECT text, event_seq FROM instructions WHERE session = ? AND kind = ? AND source = ? AND sent = 0 ORDER BY seq`, name, InstructionPrompt, FromGC)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []waitingNudge
+	for rows.Next() {
+		var w waitingNudge
+		if err := rows.Scan(&w.text, &w.eventSeq); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
 }
 
 // AnswerPermission implements Service.
@@ -232,14 +274,31 @@ func (r *Registry) Instructions(ctx context.Context, name string, after uint64) 
 			if err != nil {
 				return
 			}
+			if f := afterPending.Load(); f != nil {
+				(*f)()
+			}
 			for _, p := range pending {
+				// The instruction is claimed before it is sent, and only for
+				// the start the stream was opened for: a Cancel that moved it
+				// since it was read has taken it from the queue, and what is
+				// gone is not sent; a stream whose session was started afresh
+				// or ended since is over, and must not be handed the queue of
+				// the next start, whose numbers begin again.
+				claimed, err := r.claim(ctx, name, p.Seq, epoch)
+				if err != nil {
+					return
+				}
+				if !claimed {
+					if !r.sameStart(ctx, name, epoch) {
+						return
+					}
+					cursor = p.Seq
+					continue
+				}
+				cursor = p.Seq
 				select {
 				case out <- p.Instruction:
 				case <-ctx.Done():
-					return
-				}
-				cursor = p.Seq
-				if err := r.markSent(ctx, name, p); err != nil {
 					return
 				}
 			}
@@ -281,15 +340,28 @@ func (r *Registry) pending(ctx context.Context, name string, after uint64) ([]pe
 	return out, rows.Err()
 }
 
-func (r *Registry) markSent(ctx context.Context, name string, p pendingInstruction) error {
-	if p.sent {
-		return nil
+// afterPending, when set, is called by an Instructions stream between its
+// reading of the queue and the claim of what it read. It is for tests.
+var afterPending atomic.Pointer[func()]
+
+// claim marks instruction seq of the session sent, and reports whether it
+// was still in the queue of the start that has the epoch, which has not
+// ended. A host that attaches again from an earlier number gets what it was
+// sent before: the stream goes by number.
+func (r *Registry) claim(ctx context.Context, name string, seq uint64, epoch int64) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE instructions SET sent = 1
+		WHERE session = ? AND seq = ?
+		  AND EXISTS (SELECT 1 FROM sessions WHERE name = ? AND epoch = ? AND state <> ?)`,
+		name, seq, name, epoch, Ended)
+	if err != nil {
+		return false, err
 	}
-	err := r.queueControl(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE instructions SET sent = 1 WHERE session = ? AND seq = ?`, name, p.Seq)
-		return err
-	})
-	return err
+	n, err := res.RowsAffected()
+	if err == nil && n == 1 {
+		r.changed()
+	}
+	return n == 1, err
 }
 
 // Handling is what the session host did with a prompt it was handed.

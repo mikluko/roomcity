@@ -176,7 +176,8 @@ type Service interface {
 	// started yet ErrNotFound.
 	Prompt(ctx context.Context, name string, in PromptInput) (uint64, error)
 	// Cancel is the server's whole share of !stop: it ends the running turn,
-	// drops the prompts that wait and withdraws an open permission request.
+	// drops the owner's prompts that wait, keeps gc's nudges that wait and
+	// withdraws an open permission request.
 	Cancel(ctx context.Context, name string) error
 	// AnswerPermission queues the answer to the agent's permission request
 	// requestID: the option chosen, or "" to cancel the request.
