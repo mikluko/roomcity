@@ -138,9 +138,19 @@ func Run(ctx context.Context, o Options) error {
 		Log:          log,
 	})))
 
-	s.HandlePage(transcripts.Prefix, (&transcripts.Page{Source: reg, City: cfg.Chat.Name}).Handler())
+	side, err := newChatSide(cfg, reg, log)
+	if err != nil {
+		return err
+	}
+	if side != nil {
+		s.Handle(appServicePath, side.Handler)
+	}
+	s.HandlePage(transcripts.Prefix, (&transcripts.Page{Source: reg, City: side.city(cfg)}).Handler())
 
 	g, ctx := errgroup.WithContext(ctx)
+	if side != nil {
+		g.Go(func() error { return side.Service.Run(ctx) })
+	}
 	g.Go(func() error {
 		purgeTranscripts(ctx, reg, cfg.Server.TranscriptTerm.Duration(), purgeEvery, log)
 		return nil

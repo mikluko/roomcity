@@ -10,15 +10,19 @@
 #                                           CI does, and prints the variables as NAME=value
 #                                           lines, for $GITHUB_ENV
 #
-# Each start has a name and ports of its own, so two can run at once.
+# Each start has a name and ports of its own, so two can run at once. The
+# city "testcity" is the driver's tests', and "testserve" the serve test's: each
+# has a port of its own for its transactions, since the packages' tests run side
+# by side and a port is one process's.
 set -eu
 
 image=ghcr.io/matrix-construct/tuwunel:v2.0.0
 as_port=$((20000 + $$ % 10000))
+serve_port=$((as_port + 1))
 
 # configure writes the server's configuration and registrations into a
 # directory: the database path, the address of the city's transactions.
-configure() { # dir database_path appservice_dir city_url listen_port
+configure() { # dir database_path appservice_dir city_url listen_port serve_city_url
   dir=$1
   mkdir -p "$dir/appservices"
   cat >"$dir/tuwunel.toml" <<EOF
@@ -49,6 +53,21 @@ namespaces:
     - exclusive: true
       regex: '^#testcity(-[a-z0-9._=-]+)?:test\\.local\$'
 EOF
+  cat >"$dir/appservices/testserve.yaml" <<EOF
+id: roomcity-testserve
+url: $6
+sender_localpart: testserve
+as_token: testserve-as-token
+hs_token: testserve-hs-token
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '^@testserve(-[a-z0-9._=-]+)?:test\\.local\$'
+  aliases:
+    - exclusive: true
+      regex: '^#testserve(-[a-z0-9._=-]+)?:test\\.local\$'
+EOF
   cat >"$dir/appservices/testowner.yaml" <<EOF
 id: testowner
 url: null
@@ -68,11 +87,12 @@ up)
   name=roomcity-tuwunel-$$
   dir=$(mktemp -d)
   # The host's address as the container reaches it.
-  configure "$dir" /var/lib/tuwunel /etc/tuwunel/appservices "http://192.168.64.1:$as_port" 8008
+  configure "$dir" /var/lib/tuwunel /etc/tuwunel/appservices "http://192.168.64.1:$as_port" 8008 "http://192.168.64.1:$serve_port"
   container run -d --name "$name" -v "$dir:/etc/tuwunel:ro" "$image" -c /etc/tuwunel/tuwunel.toml >/dev/null
   ip=$(container inspect "$name" | jq -r '.[0].status.networks[0].ipv4Address | split("/")[0]')
   echo "export ROOMCITY_TEST_HOMESERVER=http://$ip:8008"
   echo "export ROOMCITY_TEST_LISTEN=0.0.0.0:$as_port"
+  echo "export ROOMCITY_TEST_SERVE_LISTEN=0.0.0.0:$serve_port"
   echo "export ROOMCITY_TEST_TUWUNEL=$name"
   ;;
 down)
@@ -82,12 +102,13 @@ run)
   bin=${2:?usage: $0 run <binary>}
   hs_port=$((30000 + $$ % 10000))
   dir=$(mktemp -d)
-  configure "$dir" "$dir/db" "$dir/appservices" "http://127.0.0.1:$as_port" "$hs_port"
+  configure "$dir" "$dir/db" "$dir/appservices" "http://127.0.0.1:$as_port" "$hs_port" "http://127.0.0.1:$serve_port"
   nohup "$bin" -c "$dir/tuwunel.toml" >"$dir/tuwunel.log" 2>&1 &
   for _ in $(seq 1 60); do
     if curl -fsS "http://127.0.0.1:$hs_port/_matrix/client/versions" >/dev/null 2>&1; then
       echo "ROOMCITY_TEST_HOMESERVER=http://127.0.0.1:$hs_port"
       echo "ROOMCITY_TEST_LISTEN=127.0.0.1:$as_port"
+      echo "ROOMCITY_TEST_SERVE_LISTEN=127.0.0.1:$serve_port"
       exit 0
     fi
     sleep 1

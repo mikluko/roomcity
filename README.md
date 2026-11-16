@@ -53,7 +53,7 @@ Go 1.27.4 or later and [buf](https://buf.build/docs/cli/installation/) are requi
 | `make image`    | builds the image with Apple's `container` and runs its tools inside it |
 
 The tests of the Matrix driver need a Tuwunel and are skipped without one; CI runs them, with Tuwunel's own binary fetched by `scripts/fetch-tuwunel.sh` (checked against a pinned checksum) and started as a process by `scripts/tuwunel-test.sh run`, and fails if there is none.
-`scripts/tuwunel-test.sh up` starts Tuwunel 2.0.0 with Apple's `container` and prints the lines to export: `ROOMCITY_TEST_HOMESERVER`, `ROOMCITY_TEST_LISTEN` (where the test serves the city's transactions, which the registration names) and `ROOMCITY_TEST_TUWUNEL`.
+`scripts/tuwunel-test.sh up` starts Tuwunel 2.0.0 with Apple's `container` and prints the lines to export: `ROOMCITY_TEST_HOMESERVER`, `ROOMCITY_TEST_LISTEN` and `ROOMCITY_TEST_SERVE_LISTEN` (where the driver tests and the serve test, each a city of its own, take the homeserver's transactions, which the registrations name) and `ROOMCITY_TEST_TUWUNEL`.
 `scripts/tuwunel-test.sh down "$ROOMCITY_TEST_TUWUNEL"` removes it.
 
 ## Release
