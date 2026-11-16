@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
 ### Fixed
 
 - The gc the server runs for a session is told the server's own runtime address, `ROOMCITY_RUNTIME_URL`, from the listener the server opened, so `gc session kill`, `reset`, `peek`, `new` and a nudge to another session no longer fail with "ROOMCITY_RUNTIME_URL is not set". Of a session's variables, the server's gc takes only the eleven by which gc knows who is calling (`GC_AGENT`, `GC_ALIAS`, `GC_SESSION_ID`, `GC_SESSION_NAME`, `GC_TEMPLATE`, `GC_SESSION_ORIGIN`, `GC_INSTANCE_TOKEN`, `GC_CONTINUATION_EPOCH`, `GC_RUNTIME_EPOCH`, `GC_PROVIDER`, `GC_STARTUP_PROMPT_DELIVERED`); the rest, the runtime's address, the city, the store, the Dolt and the providers `GC_SESSION` and `GC_BEADS` among them, are the server's, where a session could replace any `GC_*` before.
@@ -115,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.4.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.5.0...HEAD
+[0.5.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.5.0
 [0.4.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.4.0
 [0.3.3]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.3
 [0.3.2]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.2
