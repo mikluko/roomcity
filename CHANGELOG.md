@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-16
+
 ### Added
 
+- An agent sends a file of its working directory to its room with the tool `attach` of the MCP server `room`, which the session host gives every agent that takes http MCP servers (Claude Code through claudeacp, goose): an image is shown in the conversation, any other file is a file the owner can download, and the agent is told why when the room refuses one (outside the working directory, too large, a kind the room does not take). The host answers the agent's request for leave to use the room's own tools itself, so that the owner is not asked. `[chat] max_file` (default 10 MiB) and `file_kinds` (default `image/*`, `text/*`, `application/pdf`, `application/json`) bound what the room takes.
 - `HostService.Send` reaches the room: a file a session's agent sends goes through `Attach` of the chat side, and the chat side's refusals (`ErrFileTooLarge`, `ErrFileKind`, `ErrNoRoom`, `ErrChatDown`) reach the agent as `InvalidArgument`, `FailedPrecondition` and `Unavailable` with the text that names the bound. `[chat] max_file` is the one size for the server's own bound and the limit on the network listener, so a city that raises it is no longer refused at 10 MiB. A server with no `[matrix]` answers `Unavailable`.
 - `chat.Driver.SendFile` and `(*chat.Service).Attach`, the room's end of an agent's `attach`: a file is uploaded to the homeserver's media repository as the agent's user and sent as an `m.image` (a PNG, JPEG or GIF whose size is read, with its width and height) or an `m.file`; an SVG is a file until a client is seen to draw one. The caption is the body and the name the `filename`; with no caption the name is the body. `Attach` refuses a file whose bytes are of another kind than it is called (a zip called `notes.txt`, an HTML page called a picture: the bytes are looked at, since the kind is the caller's word), a file over `[chat] max_file` (a size such as `"10MiB"`, default 10 MiB) or of a media type that `[chat] file_kinds` does not list (default `image/*`, `text/*`, `application/pdf`, `application/json`) with an error that says what the room takes: `chat.ErrFileTooLarge`, `chat.ErrFileKind`, `chat.ErrNoRoom`, `chat.ErrChatDown`. A binary kind that the sniffer does not know cannot be sent whatever `file_kinds` lists, since its bytes read as something else: a `.docx` is refused as "its bytes are application/zip".
 
@@ -171,7 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.8.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.9.0...HEAD
+[0.9.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.9.0
 [0.8.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.8.0
 [0.7.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.7.0
 [0.6.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.6.0
