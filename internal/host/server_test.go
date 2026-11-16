@@ -37,6 +37,7 @@ type fakeServer struct {
 	stages      int // Stage calls
 	handled     []handledCall
 	failHandled int // Handled calls to fail, from the first
+	sent        []*roomcityv1.SendRequest
 }
 
 // handledCall is a Handled call of the host.
@@ -97,6 +98,19 @@ func (s *fakeServer) Handled(_ context.Context, req *connect.Request[roomcityv1.
 	s.handled = append(s.handled, handledCall{req.Msg.InstructionSeq, req.Msg.Handling})
 	s.notify()
 	return connect.NewResponse(&roomcityv1.HandledResponse{}), nil
+}
+
+func (s *fakeServer) Send(_ context.Context, req *connect.Request[roomcityv1.SendRequest]) (*connect.Response[roomcityv1.SendResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, req.Msg)
+	return connect.NewResponse(&roomcityv1.SendResponse{Event: "$e"}), nil
+}
+
+func (s *fakeServer) sentFiles() []*roomcityv1.SendRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*roomcityv1.SendRequest(nil), s.sent...)
 }
 
 func (s *fakeServer) failNextReports(n int) {
@@ -192,7 +206,14 @@ func decode(t *testing.T, f *roomcityv1.Frame) wire {
 // eventually waits for ok to hold of the server's frames, then returns.
 func (s *fakeServer) eventually(t *testing.T, what string, ok func([]*roomcityv1.Frame) bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	s.eventuallyWithin(t, 10*time.Second, what, ok)
+}
+
+// eventuallyWithin is eventually with a deadline of its own, for a real
+// agent whose model takes its time.
+func (s *fakeServer) eventuallyWithin(t *testing.T, d time.Duration, what string, ok func([]*roomcityv1.Frame) bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
 	for {
 		if ok(s.stored()) {
 			return

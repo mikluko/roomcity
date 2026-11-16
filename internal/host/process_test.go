@@ -3,11 +3,14 @@ package host
 import (
 	"context"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	acp "github.com/afrase/acp-go/unstable"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
 	"sarak.sh/mikluko/claudeacp/claudeacp"
@@ -20,18 +23,65 @@ import (
 // as the host would run any ACP process.
 type helperAgent struct {
 	acp.UnimplementedAgent
-	conn *acp.ClientConn
+	conn    *acp.ClientConn
+	servers []acp.MCPServer
 }
 
 func (*helperAgent) Initialize(context.Context, *acp.InitializeRequest) (*acp.InitializeResponse, error) {
-	return &acp.InitializeResponse{ProtocolVersion: acp.LatestProtocolVersion}, nil
+	res := &acp.InitializeResponse{ProtocolVersion: acp.LatestProtocolVersion}
+	if os.Getenv("ROOMCITY_TEST_AGENT") == "mcp" {
+		res.AgentCapabilities = &acp.AgentCapabilities{MCPCapabilities: &acp.MCPCapabilities{HTTP: true}}
+	}
+	return res, nil
 }
 
-func (*helperAgent) NewSession(context.Context, *acp.NewSessionRequest) (*acp.NewSessionResponse, error) {
+func (a *helperAgent) NewSession(_ context.Context, req *acp.NewSessionRequest) (*acp.NewSessionResponse, error) {
+	if os.Getenv("ROOMCITY_TEST_AGENT") != "mcp" && len(req.MCPServers) > 0 {
+		return nil, &acp.Error{Code: acp.ErrorCodeInvalidParams, Message: "an MCP server given to an agent that takes none"}
+	}
+	a.servers = req.MCPServers
 	return &acp.NewSessionResponse{SessionID: "helper-1"}, nil
 }
 
+// useRoom is what an agent that takes the room's server does with it: it calls
+// the tool attach on the file the prompt names, and says what came of it.
+func (a *helperAgent) useRoom(ctx context.Context, req *acp.PromptRequest) (*acp.PromptResponse, error) {
+	say := func(text string) {
+		_ = a.conn.SessionUpdate(ctx, &acp.SessionNotification{SessionID: req.SessionID, Update: acp.SessionUpdate{
+			AgentMessageChunk: &acp.ContentChunk{Content: acp.ContentBlock{Text: &acp.TextContent{Text: text}}},
+		}})
+	}
+	if len(a.servers) != 1 || a.servers[0].HTTP == nil || a.servers[0].HTTP.Name != "room" {
+		say("no room server given")
+		return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+	h := a.servers[0].HTTP
+	header := map[string]string{}
+	for _, kv := range h.Headers {
+		header[kv.Name] = kv.Value
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "helper", Version: "1"}, nil)
+	cs, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: h.URL, HTTPClient: &http.Client{Transport: bearer{header["Authorization"]}}, DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		say("connect: " + err.Error())
+		return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+	defer func() { _ = cs.Close() }()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "attach", Arguments: map[string]any{"path": req.Prompt[0].Text.Text, "caption": "from the agent"}})
+	if err != nil {
+		say("call: " + err.Error())
+	} else {
+		say("attach: " + res.Content[0].(*mcp.TextContent).Text)
+	}
+	return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
 func (a *helperAgent) Prompt(ctx context.Context, req *acp.PromptRequest) (*acp.PromptResponse, error) {
+	if os.Getenv("ROOMCITY_TEST_AGENT") == "mcp" {
+		return a.useRoom(ctx, req)
+	}
 	res, err := a.conn.RequestPermission(ctx, &acp.RequestPermissionRequest{
 		SessionID: req.SessionID,
 		ToolCall:  acp.ToolCallUpdate{ToolCallID: "t1"},
@@ -176,4 +226,41 @@ func TestClaudeThatRefusesItsArgumentsSaysSo(t *testing.T) {
 
 	require.ErrorContains(t, err, "the agent ended")
 	require.ErrorContains(t, err, "--bg")
+}
+
+func TestAnAgentThatTakesHttpMCPServersGetsTheRoomAndItsFileReachesTheServer(t *testing.T) {
+	t.Setenv("ROOMCITY_TEST_AGENT", "mcp")
+	server, url := newFakeServer(t)
+	server.stageWith(&roomcityv1.StageManifest{Command: []string{os.Args[0], "-test.run=TestHelperAgent"}}, nil)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chart.png"), []byte("\x89PNG\r\n\x1a\nrest"), 0o644))
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		done <- Run(ctx, Config{Session: "s", Token: testToken, Server: url, WorkDir: dir,
+			Claude: claudeacp.Config{CLIPath: "/never"}, Retry: time.Millisecond})
+	}()
+
+	server.instruct(prompt("chart.png"))
+	server.eventually(t, "the turn's end", func(fs []*roomcityv1.Frame) bool { return len(stopReasons(t, fs)) == 1 })
+	server.instruct(&roomcityv1.AttachResponse{Instruction: &roomcityv1.AttachResponse_Stop{Stop: &roomcityv1.Stop{}}})
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the host did not end")
+	}
+
+	sent := server.sentFiles()
+	require.Len(t, sent, 1)
+	require.Equal(t, "s", sent[0].Session)
+	require.Equal(t, "chart.png", sent[0].Name)
+	require.Equal(t, "image/png", sent[0].MediaType)
+	require.Equal(t, "from the agent", sent[0].Caption)
+	var text string
+	for _, f := range server.stored() {
+		text += string(f.Message)
+	}
+	require.Contains(t, text, "chart.png is in the room")
 }

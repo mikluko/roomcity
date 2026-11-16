@@ -133,6 +133,9 @@ type host struct {
 	wake    chan struct{}
 	pending map[string]chan string // permission requests by their id
 	endHost context.CancelFunc
+	// room serves the agent the room's tools; nil when the agent takes no
+	// http MCP server.
+	room *room
 	// fatalErr is what ended the host when it was not a stop.
 	fatalErr error
 }
@@ -169,6 +172,11 @@ func (h *host) run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	h.endHost = cancel
+	defer func() {
+		if h.room != nil {
+			h.room.stop()
+		}
+	}()
 
 	if err := h.resume(ctx); err != nil {
 		return err
@@ -261,7 +269,11 @@ func (h *host) session(ctx context.Context) error {
 	h.mu.Lock()
 	h.steering = steering.Supported(hello.Meta)
 	h.mu.Unlock()
-	res, err := h.conn.NewSession(ctx, &acp.NewSessionRequest{Cwd: h.cfg.WorkDir, MCPServers: []acp.MCPServer{}})
+	servers, err := h.roomServers(hello)
+	if err != nil {
+		return err
+	}
+	res, err := h.conn.NewSession(ctx, &acp.NewSessionRequest{Cwd: h.cfg.WorkDir, MCPServers: servers})
 	if err != nil {
 		return fmt.Errorf("host: new session: %w%s", err, errorData(err))
 	}
@@ -269,6 +281,32 @@ func (h *host) session(ctx context.Context) error {
 	h.sid = res.SessionID
 	h.mu.Unlock()
 	return nil
+}
+
+// roomServers starts the room's tools and returns the MCP servers session/new
+// gives the agent: the room's, when the agent says it takes an http one.
+func (h *host) roomServers(hello *acp.InitializeResponse) ([]acp.MCPServer, error) {
+	caps := hello.AgentCapabilities
+	if caps == nil || caps.MCPCapabilities == nil || !caps.MCPCapabilities.HTTP {
+		h.log.Info("the agent takes no http MCP server: the room's tools are not given to it")
+		return []acp.MCPServer{}, nil
+	}
+	r, err := startRoom(h.cfg.WorkDir, func(ctx context.Context, req *roomcityv1.SendRequest) (string, error) {
+		req.Session = h.cfg.Session
+		res, err := h.client.Send(ctx, connect.NewRequest(req))
+		if err != nil {
+			return "", err
+		}
+		return res.Msg.Event, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("host: the room's tools: %w", err)
+	}
+	h.mu.Lock()
+	h.room = r
+	h.mu.Unlock()
+	name, address, header := r.entry()
+	return []acp.MCPServer{{HTTP: &acp.MCPServerHTTP{Name: name, URL: address, Headers: []acp.HTTPHeader{{Name: "Authorization", Value: header}}}}}, nil
 }
 
 // wait waits for d or ctx's end, and reports whether ctx is still live.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -36,12 +37,18 @@ func gooseEnv(t *testing.T) {
 // gooseHost runs the host on goose acp and returns the server and a stop.
 func gooseHost(t *testing.T) (*fakeServer, func()) {
 	t.Helper()
+	return gooseHostIn(t, t.TempDir())
+}
+
+// gooseHostIn is gooseHost with the agent's working directory given.
+func gooseHostIn(t *testing.T, dir string) (*fakeServer, func()) {
+	t.Helper()
 	server, url := newFakeServer(t)
 	server.stageWith(&roomcityv1.StageManifest{Command: []string{"goose", "acp"}}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{Session: "s", Token: testToken, Server: url, WorkDir: t.TempDir(),
+		done <- Run(ctx, Config{Session: "s", Token: testToken, Server: url, WorkDir: dir,
 			Claude: claudeacp.Config{CLIPath: "/never"}, Retry: time.Millisecond, Log: nil})
 	}()
 	return server, func() {
@@ -240,4 +247,33 @@ func (c *collector) count() int {
 
 func (c *collector) RequestPermission(_ context.Context, req *acp.RequestPermissionRequest) (*acp.RequestPermissionResponse, error) {
 	return &acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.SelectedPermissionOutcome{OptionID: req.Options[0].OptionID}}}, nil
+}
+
+// The room's tool attach, called by the real goose: its request for leave is
+// the one the host will answer itself, and the file reaches the server.
+func TestRealGooseAttachesAFileThroughTheRoom(t *testing.T) {
+	gooseEnv(t)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chart.png"), []byte("\x89PNG\r\n\x1a\nrest"), 0o644))
+	server, stop := gooseHostIn(t, dir)
+	defer stop()
+
+	server.instruct(prompt("Use the attach tool of the room server to send the file chart.png to the room, with the caption hi. Then say what it answered."))
+	var asked wire
+	server.eventuallyWithin(t, time.Minute, "a permission request", func(fs []*roomcityv1.Frame) bool {
+		w, ok := permissionRequest(t, fs)
+		asked = w
+		return ok
+	})
+	t.Logf("permission request: %.400s", asked.Params)
+	server.instruct(&roomcityv1.AttachResponse{Instruction: &roomcityv1.AttachResponse_PermissionAnswer{
+		PermissionAnswer: &roomcityv1.PermissionAnswer{RequestId: string(asked.ID), OptionId: "allow_once"},
+	}})
+	server.eventuallyWithin(t, time.Minute, "the turn's end", func(fs []*roomcityv1.Frame) bool { return len(stopReasons(t, fs)) > 0 })
+
+	sent := server.sentFiles()
+	require.Len(t, sent, 1)
+	require.Equal(t, "chart.png", sent[0].Name)
+	require.Equal(t, "image/png", sent[0].MediaType)
+	require.Equal(t, "hi", sent[0].Caption)
 }
