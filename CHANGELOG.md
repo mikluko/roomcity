@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- On `Cancel` the host keeps the prompts gc sent, which run in order once the turn has stopped, and drops only the owner's waiting prompts.
+
 ### Added
 
 - A session's transcript as a page of the server's page listener: `/-/<session>` shows the session's card and its stream as a room shows it, but whole (a tool call's output and a permission request's detail are not cut, and the owner's own words are in), `/-/<session>/raw` gives the stream as it passed through the server, one JSON message a line, and `/-/` lists the sessions. The page is read-only and sits behind the pod's authenticating proxy; the journal's notice of a session's end links to it. A transcript is removed `transcript_term` after its session ended, 90 days unless the `[server]` table says otherwise; a session still running is never removed.
