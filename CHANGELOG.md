@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
 ### Added
 
 - `examples/minimal`: the configuration of a city as a minimal example of a deployment, with the names of the deployment it was taken from replaced by placeholders: the city's repository (`city/`), the manifests of its place in a Kubernetes cluster (`k8s/`), the registration of the application service as a template, and a README that says what must be there before it, what to replace and in which order. The tests load its `roomcity.toml` with the server's own loader and parse the city's files, and the test workflow renders the manifests.
@@ -104,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.3...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.4.0...HEAD
+[0.4.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.4.0
 [0.3.3]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.3
 [0.3.2]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.2
 [0.3.1]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.1
