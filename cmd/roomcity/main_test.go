@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func TestRun(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := run(tt.argv, &stdout, &stderr)
+			code := run(context.Background(), tt.argv, process{Stdout: &stdout, Stderr: &stderr})
 			require.Equal(t, tt.code, code)
 			require.Equal(t, tt.stdout, stdout.String())
 			require.Equal(t, tt.stderr, stderr.String())

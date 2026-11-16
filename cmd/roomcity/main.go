@@ -9,10 +9,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 )
 
 const (
@@ -41,8 +44,22 @@ var aliases = map[string]string{
 	"gc":              "gc",
 }
 
+// process is what a command has of the process it runs in.
+type process struct {
+	Stdin          io.Reader
+	Stdout, Stderr io.Writer
+	// Env is the environment, as os.Environ gives it.
+	Env []string
+	// Dir is the working directory.
+	Dir string
+}
+
+// command runs with ctx, which ends on SIGINT or SIGTERM, and returns the
+// exit code.
+type command func(ctx context.Context, args []string, p process) int
+
 // commands holds every command of the binary.
-var commands = map[string]func(args []string, stderr io.Writer) int{
+var commands = map[string]command{
 	"runtime": notImplemented("runtime"),
 	"server":  notImplemented("server"),
 	"host":    notImplemented("host"),
@@ -50,27 +67,30 @@ var commands = map[string]func(args []string, stderr io.Writer) int{
 }
 
 func main() {
-	os.Exit(run(os.Args, os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	dir, _ := os.Getwd()
+	os.Exit(run(ctx, os.Args, process{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Env: os.Environ(), Dir: dir}))
 }
 
 // run dispatches argv, whose first element is the program name, and returns
 // the exit code.
-func run(argv []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, argv []string, p process) int {
 	name, args := resolve(argv)
 	switch name {
 	case "":
-		_, _ = io.WriteString(stderr, usage)
+		_, _ = io.WriteString(p.Stderr, usage)
 		return exitUsage
 	case "-h", "-help", "--help", "help":
-		_, _ = io.WriteString(stdout, usage)
+		_, _ = io.WriteString(p.Stdout, usage)
 		return exitOK
 	}
-	command, ok := commands[name]
+	run, ok := commands[name]
 	if !ok {
-		_, _ = fmt.Fprintf(stderr, "roomcity: unknown command %q\n%s", name, usage)
+		_, _ = fmt.Fprintf(p.Stderr, "roomcity: unknown command %q\n%s", name, usage)
 		return exitUsage
 	}
-	return command(args, stderr)
+	return run(ctx, args, p)
 }
 
 // resolve returns the command argv names and the arguments after it. The
@@ -90,9 +110,9 @@ func resolve(argv []string) (string, []string) {
 }
 
 // notImplemented returns a command that fails, saying that name does nothing.
-func notImplemented(name string) func([]string, io.Writer) int {
-	return func(_ []string, stderr io.Writer) int {
-		_, _ = fmt.Fprintf(stderr, "roomcity %s: not implemented\n", name)
+func notImplemented(name string) command {
+	return func(_ context.Context, _ []string, p process) int {
+		_, _ = fmt.Fprintf(p.Stderr, "roomcity %s: not implemented\n", name)
 		return exitFailure
 	}
 }
