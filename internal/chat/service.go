@@ -144,11 +144,9 @@ func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.I
 	}
 	target.session = info.Name
 	_, subscribed := s.subs[info.Name]
-	if info.State != session.Ended {
-		s.subs[info.Name] = struct{}{}
-	}
+	s.subs[info.Name] = struct{}{}
 	s.mu.Unlock()
-	if subscribed || info.State == session.Ended {
+	if subscribed {
 		return
 	}
 	events, err := s.Sessions.Subscribe(ctx, info.Name, session.FromNow)

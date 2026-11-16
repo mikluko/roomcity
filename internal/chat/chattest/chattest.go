@@ -25,6 +25,7 @@ type Sessions struct {
 	prompts    map[string][]string
 	cancels    map[string]int
 	answers    []PermissionAnswer
+	subscribed map[string]int
 
 	// PromptErr, when set, is what Prompt returns, and the prompt is not kept.
 	PromptErr error
@@ -102,6 +103,12 @@ func (s *Sessions) CloseWatch() {
 // after the call, whatever from says.
 func (s *Sessions) Subscribe(ctx context.Context, name string, _ uint64) (<-chan session.Event, error) {
 	ch := s.channel(name)
+	s.mu.Lock()
+	if s.subscribed == nil {
+		s.subscribed = map[string]int{}
+	}
+	s.subscribed[name]++
+	s.mu.Unlock()
 	go func() {
 		<-ctx.Done()
 		close(ch)
@@ -162,6 +169,13 @@ func (s *Sessions) Emit(name string, events ...session.Event) {
 	for _, ev := range events {
 		ch <- ev
 	}
+}
+
+// Subscriptions returns how many times the session has been subscribed to.
+func (s *Sessions) Subscriptions(name string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.subscribed[name]
 }
 
 // Prompts returns the prompts given to the session so far.

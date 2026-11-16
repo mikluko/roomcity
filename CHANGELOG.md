@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The journal's "began anew" notice, and the room's, for an always-on agent whose session had ended before the server started: the chat side did not follow an ended session, so the next start, which the registry writes to the session's stream before the watch tells anyone of it, was behind the subscription's cursor and was never shown. It follows every agent session from the first time it sees it, ended or not.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

@@ -341,6 +341,20 @@ func TestServiceSendsARecordedAnswerParagraphByParagraph(t *testing.T) {
 	require.Greater(t, len(got), 1, "the answer is more than one message")
 }
 
+func TestServiceFollowsAnAgentsSessionThatHadEndedBeforeTheServerStarted(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(alwaysOn("host", session.Ended))
+	driver, _ := runService(t, sessions)
+	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return sessions.Subscriptions("s-host") == 1 }, 5*time.Second, 10*time.Millisecond,
+		"its next start is written to the stream before anyone is told of it: the subscription has to be there already")
+
+	sessions.Add(alwaysOn("host", session.Starting))
+	sessions.Emit("s-host", session.Lifecycle{Seq: 7, Kind: session.StartedAfresh})
+	require.Eventually(t, func() bool { return len(driver.messagesIn("!journal")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, sessions.Subscriptions("s-host"), "and it is made once")
+}
+
 func TestServiceTellsTheRoomWhenTheSessionBeginsAnew(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Running))
