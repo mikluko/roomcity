@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
 	"sarak.sh/mikluko/roomcity/internal/runtimecmd"
+	"sarak.sh/mikluko/roomcity/internal/session"
 	"sarak.sh/mikluko/roomcity/internal/sessionauth"
 )
 
@@ -36,6 +38,11 @@ type Config struct {
 	RuntimeURL string
 	// Log gets one line per command; nil is slog.Default.
 	Log *slog.Logger
+	// Identity returns the variables by which gc knows who session is, as
+	// the server keeps them of its start, and false for a session whose start
+	// kept none; the request's own are then taken, as before. A nil Identity
+	// takes the request's for every session.
+	Identity func(ctx context.Context, session string) (map[string]string, bool, error)
 	// Authorize says whether token is the token of session. A handler with
 	// none refuses every call.
 	Authorize func(session, token string) bool
@@ -64,10 +71,12 @@ func New(cfg Config) *Handler {
 
 // Run runs gc once, for a session that proves itself by its token. A call
 // with no session or no token is refused before Authorize is asked. A gc that ends with a non-zero code is an answer; a gc
-// that does not start is an error. From the request gc takes the variables
-// that say who is calling, those of identity, and nothing else: the list is
-// the whole of what a session decides. Through gc a session can do what gc's
-// command line does in the city, and every other variable is the server's.
+// that does not start is an error. The variables that say who is calling,
+// session.IdentityEnv, are the server's record of the session's start, which
+// a session does not decide; only for a session whose start kept none are
+// they the request's. Every other variable is the server's, the call's own
+// being its arguments and its input. Through gc a session can do what gc's
+// command line does in the city.
 func (h *Handler) Run(ctx context.Context, req *connect.Request[roomcityv1.RunRequest]) (*connect.Response[roomcityv1.RunResponse], error) {
 	msg := req.Msg
 	token := sessionauth.Token(req.Header())
@@ -76,13 +85,17 @@ func (h *Handler) Run(ctx context.Context, req *connect.Request[roomcityv1.RunRe
 	}
 	cmd := exec.CommandContext(ctx, h.cfg.GcPath, msg.Args...)
 	cmd.Dir = h.cfg.CityDir
-	cmd.Env = environ(h.cfg.Env, msg.Env, h.cfg.RuntimeURL)
+	claimed, err := h.identity(ctx, msg)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("the session's identity: %w", err))
+	}
+	cmd.Env = environ(h.cfg.Env, claimed, h.cfg.RuntimeURL)
 	cmd.Stdin = bytes.NewReader(msg.Stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
 	began := time.Now()
-	err := cmd.Run()
+	err = cmd.Run()
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -125,28 +138,27 @@ func plain(s string) bool {
 	return s[0] != '-'
 }
 
-// identity is what gc sets as a session's own when it starts it and reads to
-// know who is calling, at the revision the image pins.
-// GC_DIR, GC_BEADS_SCOPE_ROOT, GC_RIG and GC_RIG_ROOT of the same group name a
-// directory or a store, and the server's gc takes those from the city.
-var identity = map[string]bool{
-	"GC_AGENT": true, "GC_ALIAS": true, "GC_SESSION_ID": true, "GC_SESSION_NAME": true,
-	"GC_TEMPLATE": true, "GC_SESSION_ORIGIN": true,
-	// Set for a session elsewhere than there, and read by gc from the caller:
-	// the instance token a drain-ack and a pool seat's claim must carry, the
-	// epochs, the provider and whether the startup prompt was delivered.
-	"GC_INSTANCE_TOKEN": true, "GC_CONTINUATION_EPOCH": true, "GC_RUNTIME_EPOCH": true,
-	"GC_PROVIDER": true, "GC_STARTUP_PROMPT_DELIVERED": true,
+// identity returns the variables gc is to take as the caller's: the server's
+// record of the session's start where it has one, the request's otherwise.
+func (h *Handler) identity(ctx context.Context, msg *roomcityv1.RunRequest) (map[string]string, error) {
+	if h.cfg.Identity == nil {
+		return msg.Env, nil
+	}
+	rec, ok, err := h.cfg.Identity(ctx, msg.Session)
+	if err != nil || !ok {
+		return msg.Env, err
+	}
+	return rec, nil
 }
 
-// environ is base with the identity entries of session set over it, and the
+// environ is base with the identity entries of the caller set over it, and the
 // runtime's address set last.
-func environ(base []string, session map[string]string, runtimeURL string) []string {
-	taken := func(name string) bool { return identity[name] }
-	env := make([]string, 0, len(base)+len(session)+1)
+func environ(base []string, caller map[string]string, runtimeURL string) []string {
+	taken := func(name string) bool { return slices.Contains(session.IdentityEnv, name) }
+	env := make([]string, 0, len(base)+len(caller)+1)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
-		if _, over := session[name]; over && taken(name) {
+		if _, over := caller[name]; over && taken(name) {
 			continue
 		}
 		if name == runtimecmd.EnvURL && runtimeURL != "" {
@@ -154,7 +166,7 @@ func environ(base []string, session map[string]string, runtimeURL string) []stri
 		}
 		env = append(env, kv)
 	}
-	for name, value := range session {
+	for name, value := range caller {
 		if taken(name) {
 			env = append(env, name+"="+value)
 		}

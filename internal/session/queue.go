@@ -601,6 +601,56 @@ func (r *Registry) Mark(ctx context.Context, name, key string) (string, error) {
 	return v, err
 }
 
+// IdentityEnv are the variables of a start's environment by which gc knows
+// who is calling it, as gc's own list of session-scoped variables has them
+// (execenv.SessionScopedEnvKeys at the revision the image pins) less those of
+// a call (GC_HOOK_DEADLINE) and of another tool (BEADS_*, CLAUDE_CODE_*), plus
+// the provider and the startup mark that gc reads of the caller. The first
+// three change in a session's life, which is gc stamping an adopted runtime;
+// the rest are fixed by the start.
+var IdentityEnv = []string{
+	"GC_SESSION_ID", "GC_RUNTIME_EPOCH", "GC_INSTANCE_TOKEN",
+	"GC_AGENT", "GC_ALIAS", "GC_SESSION_NAME", "GC_TEMPLATE", "GC_SESSION_ORIGIN",
+	"GC_CONTINUATION_EPOCH", "GC_PROVIDER", "GC_STARTUP_PROMPT_DELIVERED",
+}
+
+// identityRecorded is the mark that says a start's identity was recorded: a
+// session started before the registry did so has none.
+const identityRecorded = "ROOMCITY_IDENTITY_RECORDED"
+
+// RecordIdentity keeps the IdentityEnv variables of a start's environment as
+// the session's marks, and that they were kept. It is called after ClearMarks
+// of the start.
+func (r *Registry) RecordIdentity(ctx context.Context, name string, env map[string]string) error {
+	for _, k := range IdentityEnv {
+		if v := env[k]; v != "" {
+			if err := r.SetMark(ctx, name, k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return r.SetMark(ctx, name, identityRecorded, "1")
+}
+
+// Identity returns the IdentityEnv variables the session's marks hold now, and
+// false for a session whose start did not record them.
+func (r *Registry) Identity(ctx context.Context, name string) (map[string]string, bool, error) {
+	if v, err := r.Mark(ctx, name, identityRecorded); err != nil || v == "" {
+		return nil, false, err
+	}
+	env := map[string]string{}
+	for _, k := range IdentityEnv {
+		v, err := r.Mark(ctx, name, k)
+		if err != nil {
+			return nil, false, err
+		}
+		if v != "" {
+			env[k] = v
+		}
+	}
+	return env, true, nil
+}
+
 // RemoveMark removes the session's mark key; one that is not set is no
 // error.
 func (r *Registry) RemoveMark(ctx context.Context, name, key string) error {

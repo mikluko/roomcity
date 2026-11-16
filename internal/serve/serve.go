@@ -156,6 +156,7 @@ func Run(ctx context.Context, o Options) error {
 		CityDir:    cfg.Server.CityDir,
 		GcPath:     cfg.Server.Gc,
 		Authorize:  reg.Authorize,
+		Identity:   reg.Identity,
 		RuntimeURL: "http://" + o.Listeners.Runtime.Addr().String(),
 		Log:        log,
 	})))

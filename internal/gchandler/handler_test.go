@@ -3,6 +3,7 @@ package gchandler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -167,4 +168,39 @@ func TestRunLogsTheCommandAndItsExitAndNothingMore(t *testing.T) {
 	for _, leak := range []string{"guest", "secret", "typed-output"} {
 		require.NotContains(t, logged.String(), leak)
 	}
+}
+
+func TestRunTakesWhoIsCallingFromTheServersRecordAndNotFromTheRequest(t *testing.T) {
+	gc := fakeGc(t, `echo "$GC_AGENT|$GC_INSTANCE_TOKEN|$GC_SESSION_ID|[$GC_TEMPLATE]"`)
+	record := map[string]string{"GC_AGENT": "guest", "GC_INSTANCE_TOKEN": "mine", "GC_SESSION_ID": "sa-1"}
+	h := New(Config{CityDir: t.TempDir(), GcPath: gc, Authorize: authorize,
+		Identity: func(_ context.Context, session string) (map[string]string, bool, error) {
+			require.Equal(t, "s", session)
+			return record, true, nil
+		}})
+
+	res := run(t, h, &roomcityv1.RunRequest{Session: "s", Env: map[string]string{
+		"GC_AGENT": "host", "GC_INSTANCE_TOKEN": "theirs", "GC_SESSION_ID": "sa-2", "GC_TEMPLATE": "host",
+	}})
+
+	require.Equal(t, "guest|mine|sa-1|[]\n", string(res.Stdout), "what the record lacks, the request does not add")
+}
+
+func TestRunTakesTheRequestsIdentityOfASessionWhoseStartKeptNone(t *testing.T) {
+	gc := fakeGc(t, `echo "$GC_AGENT|$GC_HOME"`)
+	h := New(Config{CityDir: t.TempDir(), GcPath: gc, Authorize: authorize, Env: []string{"GC_HOME=/server"},
+		Identity: func(context.Context, string) (map[string]string, bool, error) { return nil, false, nil }})
+
+	res := run(t, h, &roomcityv1.RunRequest{Session: "s", Env: map[string]string{"GC_AGENT": "guest", "GC_HOME": "/evil"}})
+
+	require.Equal(t, "guest|/server\n", string(res.Stdout))
+}
+
+func TestRunFailsWhenTheServerCannotReadTheRecord(t *testing.T) {
+	h := New(Config{CityDir: t.TempDir(), GcPath: fakeGc(t, `echo ran`), Authorize: authorize,
+		Identity: func(context.Context, string) (map[string]string, bool, error) { return nil, false, errors.New("disk") }})
+
+	_, err := h.Run(context.Background(), request(&roomcityv1.RunRequest{Session: "s"}))
+
+	require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
 }

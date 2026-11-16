@@ -254,6 +254,12 @@ func TestStartMakesAJobAndReturnsOnlyAfterTheAgentAnswered(t *testing.T) {
 	v, err := f.reg.Mark(f.ctx, "host-1", "GC_SESSION_ID")
 	require.NoError(t, err)
 	require.Equal(t, "gc-7", v)
+
+	identity, kept, err := f.reg.Identity(f.ctx, "host-1")
+	require.NoError(t, err)
+	require.True(t, kept)
+	require.Equal(t, "gc-7", identity["GC_SESSION_ID"])
+	require.Equal(t, "host", identity["GC_AGENT"])
 }
 
 func TestTheStartConfigsNudgeIsTheFirstPromptAndTheFramesComeOutInOrder(t *testing.T) {

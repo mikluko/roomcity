@@ -745,3 +745,31 @@ func TestAStartAfreshAndAnEndCloseTheRecordsOfTheOwnersPromptsThatWaited(t *test
 	require.NoError(t, err)
 	require.Empty(t, dropped("new"))
 }
+
+func TestAStartsIdentityIsKeptAsMarksAndTheOnesGcStampsMove(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "guest", session.Task)
+	require.NoError(t, err)
+
+	_, ok, err := r.Identity(ctx, "s")
+	require.NoError(t, err)
+	require.False(t, ok, "a start that kept none")
+
+	require.NoError(t, r.RecordIdentity(ctx, "s", map[string]string{
+		"GC_AGENT": "guest", "GC_RUNTIME_EPOCH": "5", "GC_INSTANCE_TOKEN": "tok", "GC_CONTROLLER_TOKEN": "x", "GC_HOME": "/h", "GC_ALIAS": "",
+	}))
+	got, ok, err := r.Identity(ctx, "s")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{"GC_AGENT": "guest", "GC_RUNTIME_EPOCH": "5", "GC_INSTANCE_TOKEN": "tok"}, got)
+
+	// gc's adoption barrier writes the epoch of a runtime it adopts.
+	require.NoError(t, r.SetMark(ctx, "s", "GC_RUNTIME_EPOCH", "6"))
+	got, _, _ = r.Identity(ctx, "s")
+	require.Equal(t, "6", got["GC_RUNTIME_EPOCH"])
+
+	require.NoError(t, r.ClearMarks(ctx, "s"))
+	_, ok, _ = r.Identity(ctx, "s")
+	require.False(t, ok, "a start afresh clears the record before it makes its own")
+}

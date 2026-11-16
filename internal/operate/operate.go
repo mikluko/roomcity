@@ -518,7 +518,7 @@ func (o *Operator) setMarks(ctx context.Context, name string, sc startConfig) er
 			return err
 		}
 	}
-	return nil
+	return o.reg.RecordIdentity(ctx, name, sc.Env)
 }
 
 // startProcess runs what gc starts for a service agent as a process of the
