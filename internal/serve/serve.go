@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"sarak.sh/mikluko/roomcity/internal/chat"
 	"sarak.sh/mikluko/roomcity/internal/config"
 	"sarak.sh/mikluko/roomcity/internal/gchandler"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
@@ -150,8 +151,20 @@ func Run(ctx context.Context, o Options) error {
 	defer func() { _ = reg.Close() }()
 	reg.SetResetter(resetter(cfg))
 
+	side, err := newChatSide(cfg, reg, log)
+	if err != nil {
+		return err
+	}
+	files, maxFile := o.Files, int64(cfg.Chat.MaxFile)
+	if maxFile <= 0 {
+		maxFile = int64(chat.DefaultMaxFile)
+	}
+	if files == nil && side != nil {
+		files = roomFiles{side.Service}
+	}
+
 	s := server.New()
-	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: o.Files, Log: log}))
+	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: files, MaxFile: maxFile, Log: log}))
 	s.Handle(roomcityv1connect.NewGcServiceHandler(gchandler.New(gchandler.Config{
 		CityDir:    cfg.Server.CityDir,
 		GcPath:     cfg.Server.Gc,
@@ -170,10 +183,6 @@ func Run(ctx context.Context, o Options) error {
 		Log:          log,
 	})))
 
-	side, err := newChatSide(cfg, reg, log)
-	if err != nil {
-		return err
-	}
 	if side != nil {
 		s.Handle(appServicePath, side.Handler)
 	}
@@ -192,7 +201,7 @@ func Run(ctx context.Context, o Options) error {
 		on   net.Listener
 		h    http.Handler
 	}{
-		{"network", o.Listeners.Network, server.LimitSend(s.Handler(), reg, server.DefaultMaxFile)},
+		{"network", o.Listeners.Network, server.LimitSend(s.Handler(), reg, maxFile)},
 		{"runtime", o.Listeners.Runtime, s.RuntimeHandler()},
 		{"page", o.Listeners.Page, s.PageHandler()},
 	} {
