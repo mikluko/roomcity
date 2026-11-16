@@ -341,3 +341,27 @@ func (r *Registry) WaitRunning(ctx context.Context, name string) error {
 		}
 	}
 }
+
+// PutBundle keeps what the session host fetches once before it starts the
+// agent: the manifest and the archive as the server built them, both opaque
+// to the registry. A start of the session discards the earlier bundle.
+func (r *Registry) PutBundle(ctx context.Context, name string, manifest, archive []byte) error {
+	if err := r.exists(ctx, name); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO bundles (session, manifest, archive) VALUES (?, ?, ?)
+		ON CONFLICT (session) DO UPDATE SET manifest = excluded.manifest, archive = excluded.archive`,
+		name, manifest, archive)
+	return err
+}
+
+// Bundle returns what PutBundle kept for the session's latest start, and
+// ErrNotFound when it kept nothing.
+func (r *Registry) Bundle(ctx context.Context, name string) (manifest, archive []byte, err error) {
+	err = r.db.QueryRowContext(ctx, `SELECT manifest, archive FROM bundles WHERE session = ?`, name).Scan(&manifest, &archive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	return manifest, archive, err
+}

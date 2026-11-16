@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS events (
 	lkind     INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session, seq)
 );
+CREATE TABLE IF NOT EXISTS bundles (
+	session  TEXT PRIMARY KEY,
+	manifest BLOB NOT NULL,
+	archive  BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS instructions (
 	session    TEXT NOT NULL,
 	seq        INTEGER NOT NULL,
@@ -187,6 +192,9 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM instructions WHERE session = ?`, name); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM bundles WHERE session = ?`, name); err != nil {
 			return err
 		}
 		_, err := r.appendEvent(tx, name, Lifecycle{Kind: lk})
