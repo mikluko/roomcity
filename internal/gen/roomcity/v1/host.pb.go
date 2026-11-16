@@ -650,6 +650,222 @@ func (x *Frame) GetMessage() []byte {
 	return nil
 }
 
+type StageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Session       string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StageRequest) Reset() {
+	*x = StageRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StageRequest) ProtoMessage() {}
+
+func (x *StageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StageRequest.ProtoReflect.Descriptor instead.
+func (*StageRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *StageRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+type StageResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Part:
+	//
+	//	*StageResponse_Manifest
+	//	*StageResponse_Archive
+	Part          isStageResponse_Part `protobuf_oneof:"part"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StageResponse) Reset() {
+	*x = StageResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StageResponse) ProtoMessage() {}
+
+func (x *StageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StageResponse.ProtoReflect.Descriptor instead.
+func (*StageResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *StageResponse) GetPart() isStageResponse_Part {
+	if x != nil {
+		return x.Part
+	}
+	return nil
+}
+
+func (x *StageResponse) GetManifest() *StageManifest {
+	if x != nil {
+		if x, ok := x.Part.(*StageResponse_Manifest); ok {
+			return x.Manifest
+		}
+	}
+	return nil
+}
+
+func (x *StageResponse) GetArchive() []byte {
+	if x != nil {
+		if x, ok := x.Part.(*StageResponse_Archive); ok {
+			return x.Archive
+		}
+	}
+	return nil
+}
+
+type isStageResponse_Part interface {
+	isStageResponse_Part()
+}
+
+type StageResponse_Manifest struct {
+	// Manifest is the first message of the stream, and the only one.
+	Manifest *StageManifest `protobuf:"bytes,1,opt,name=manifest,proto3,oneof"`
+}
+
+type StageResponse_Archive struct {
+	// Archive is a piece of the tar stream that follows the manifest, to be
+	// joined in order. The files in it are extracted under the session's
+	// working directory, which is where the paths in it are relative to.
+	Archive []byte `protobuf:"bytes,2,opt,name=archive,proto3,oneof"`
+}
+
+func (*StageResponse_Manifest) isStageResponse_Part() {}
+
+func (*StageResponse_Archive) isStageResponse_Part() {}
+
+// StageManifest is what the host does around the agent's start.
+type StageManifest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's command as gc's start gave it, program name first, split
+	// into words. A path in it is absolute in the pod. What the host does with
+	// it is the agent's business: the host of Claude Code takes the words after
+	// the program as claude's arguments, and ignores the program.
+	Command []string `protobuf:"bytes,1,rep,name=command,proto3" json:"command,omitempty"`
+	// Commands run with sh -c in the working directory, before the agent
+	// starts. One that fails ends the host.
+	PreStart []string `protobuf:"bytes,2,rep,name=pre_start,json=preStart,proto3" json:"pre_start,omitempty"`
+	// Commands run the same way once the agent's session is up, then the
+	// script, then the live commands. One that fails is logged, not fatal.
+	SessionSetup []string `protobuf:"bytes,3,rep,name=session_setup,json=sessionSetup,proto3" json:"session_setup,omitempty"`
+	// The text of a script, run with sh after session_setup.
+	SessionSetupScript string   `protobuf:"bytes,4,opt,name=session_setup_script,json=sessionSetupScript,proto3" json:"session_setup_script,omitempty"`
+	SessionLive        []string `protobuf:"bytes,5,rep,name=session_live,json=sessionLive,proto3" json:"session_live,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *StageManifest) Reset() {
+	*x = StageManifest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StageManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StageManifest) ProtoMessage() {}
+
+func (x *StageManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StageManifest.ProtoReflect.Descriptor instead.
+func (*StageManifest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *StageManifest) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *StageManifest) GetPreStart() []string {
+	if x != nil {
+		return x.PreStart
+	}
+	return nil
+}
+
+func (x *StageManifest) GetSessionSetup() []string {
+	if x != nil {
+		return x.SessionSetup
+	}
+	return nil
+}
+
+func (x *StageManifest) GetSessionSetupScript() string {
+	if x != nil {
+		return x.SessionSetupScript
+	}
+	return ""
+}
+
+func (x *StageManifest) GetSessionLive() []string {
+	if x != nil {
+		return x.SessionLive
+	}
+	return nil
+}
+
 var File_roomcity_v1_host_proto protoreflect.FileDescriptor
 
 const file_roomcity_v1_host_proto_rawDesc = "" +
@@ -683,7 +899,19 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x129\n" +
 	"\tdirection\x18\x03 \x01(\x0e2\x1b.roomcity.v1.FrameDirectionR\tdirection\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\fR\amessage*\\\n" +
+	"\amessage\x18\x04 \x01(\fR\amessage\"(\n" +
+	"\fStageRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\"m\n" +
+	"\rStageResponse\x128\n" +
+	"\bmanifest\x18\x01 \x01(\v2\x1a.roomcity.v1.StageManifestH\x00R\bmanifest\x12\x1a\n" +
+	"\aarchive\x18\x02 \x01(\fH\x00R\aarchiveB\x06\n" +
+	"\x04part\"\xc0\x01\n" +
+	"\rStageManifest\x12\x18\n" +
+	"\acommand\x18\x01 \x03(\tR\acommand\x12\x1b\n" +
+	"\tpre_start\x18\x02 \x03(\tR\bpreStart\x12#\n" +
+	"\rsession_setup\x18\x03 \x03(\tR\fsessionSetup\x120\n" +
+	"\x14session_setup_script\x18\x04 \x01(\tR\x12sessionSetupScript\x12!\n" +
+	"\fsession_live\x18\x05 \x03(\tR\vsessionLive*\\\n" +
 	"\fPromptSource\x12\x1d\n" +
 	"\x19PROMPT_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13PROMPT_SOURCE_OWNER\x10\x01\x12\x14\n" +
@@ -691,10 +919,11 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\x0eFrameDirection\x12\x1f\n" +
 	"\x1bFRAME_DIRECTION_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18FRAME_DIRECTION_TO_AGENT\x10\x01\x12\x1e\n" +
-	"\x1aFRAME_DIRECTION_FROM_AGENT\x10\x022\x95\x01\n" +
+	"\x1aFRAME_DIRECTION_FROM_AGENT\x10\x022\xd7\x01\n" +
 	"\vHostService\x12C\n" +
 	"\x06Attach\x12\x1a.roomcity.v1.AttachRequest\x1a\x1b.roomcity.v1.AttachResponse0\x01\x12A\n" +
-	"\x06Report\x12\x1a.roomcity.v1.ReportRequest\x1a\x1b.roomcity.v1.ReportResponseB\xa8\x01\n" +
+	"\x06Report\x12\x1a.roomcity.v1.ReportRequest\x1a\x1b.roomcity.v1.ReportResponse\x12@\n" +
+	"\x05Stage\x12\x19.roomcity.v1.StageRequest\x1a\x1a.roomcity.v1.StageResponse0\x01B\xa8\x01\n" +
 	"\x0fcom.roomcity.v1B\tHostProtoP\x01Z=sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1;roomcityv1\xa2\x02\x03RXX\xaa\x02\vRoomcity.V1\xca\x02\vRoomcity\\V1\xe2\x02\x17Roomcity\\V1\\GPBMetadata\xea\x02\fRoomcity::V1b\x06proto3"
 
 var (
@@ -710,7 +939,7 @@ func file_roomcity_v1_host_proto_rawDescGZIP() []byte {
 }
 
 var file_roomcity_v1_host_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_roomcity_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_roomcity_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_roomcity_v1_host_proto_goTypes = []any{
 	(PromptSource)(0),             // 0: roomcity.v1.PromptSource
 	(FrameDirection)(0),           // 1: roomcity.v1.FrameDirection
@@ -723,7 +952,10 @@ var file_roomcity_v1_host_proto_goTypes = []any{
 	(*ReportRequest)(nil),         // 8: roomcity.v1.ReportRequest
 	(*ReportResponse)(nil),        // 9: roomcity.v1.ReportResponse
 	(*Frame)(nil),                 // 10: roomcity.v1.Frame
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*StageRequest)(nil),          // 11: roomcity.v1.StageRequest
+	(*StageResponse)(nil),         // 12: roomcity.v1.StageResponse
+	(*StageManifest)(nil),         // 13: roomcity.v1.StageManifest
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_roomcity_v1_host_proto_depIdxs = []int32{
 	4,  // 0: roomcity.v1.AttachResponse.prompt:type_name -> roomcity.v1.Prompt
@@ -732,17 +964,20 @@ var file_roomcity_v1_host_proto_depIdxs = []int32{
 	7,  // 3: roomcity.v1.AttachResponse.stop:type_name -> roomcity.v1.Stop
 	0,  // 4: roomcity.v1.Prompt.source:type_name -> roomcity.v1.PromptSource
 	10, // 5: roomcity.v1.ReportRequest.frames:type_name -> roomcity.v1.Frame
-	11, // 6: roomcity.v1.Frame.time:type_name -> google.protobuf.Timestamp
+	14, // 6: roomcity.v1.Frame.time:type_name -> google.protobuf.Timestamp
 	1,  // 7: roomcity.v1.Frame.direction:type_name -> roomcity.v1.FrameDirection
-	2,  // 8: roomcity.v1.HostService.Attach:input_type -> roomcity.v1.AttachRequest
-	8,  // 9: roomcity.v1.HostService.Report:input_type -> roomcity.v1.ReportRequest
-	3,  // 10: roomcity.v1.HostService.Attach:output_type -> roomcity.v1.AttachResponse
-	9,  // 11: roomcity.v1.HostService.Report:output_type -> roomcity.v1.ReportResponse
-	10, // [10:12] is the sub-list for method output_type
-	8,  // [8:10] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	13, // 8: roomcity.v1.StageResponse.manifest:type_name -> roomcity.v1.StageManifest
+	2,  // 9: roomcity.v1.HostService.Attach:input_type -> roomcity.v1.AttachRequest
+	8,  // 10: roomcity.v1.HostService.Report:input_type -> roomcity.v1.ReportRequest
+	11, // 11: roomcity.v1.HostService.Stage:input_type -> roomcity.v1.StageRequest
+	3,  // 12: roomcity.v1.HostService.Attach:output_type -> roomcity.v1.AttachResponse
+	9,  // 13: roomcity.v1.HostService.Report:output_type -> roomcity.v1.ReportResponse
+	12, // 14: roomcity.v1.HostService.Stage:output_type -> roomcity.v1.StageResponse
+	12, // [12:15] is the sub-list for method output_type
+	9,  // [9:12] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_roomcity_v1_host_proto_init() }
@@ -756,13 +991,17 @@ func file_roomcity_v1_host_proto_init() {
 		(*AttachResponse_PermissionAnswer)(nil),
 		(*AttachResponse_Stop)(nil),
 	}
+	file_roomcity_v1_host_proto_msgTypes[10].OneofWrappers = []any{
+		(*StageResponse_Manifest)(nil),
+		(*StageResponse_Archive)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_roomcity_v1_host_proto_rawDesc), len(file_roomcity_v1_host_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

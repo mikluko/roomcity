@@ -16,6 +16,10 @@ service HostService {
   // order. The server acknowledges the last one it stored; the host sends
   // the ones after it again when a call fails.
   rpc Report(ReportRequest) returns (ReportResponse);
+  // Stage hands the host what gc's start of the session names on the server's
+  // side: a manifest, then the files, as a tar stream. The host asks once,
+  // before it starts the agent.
+  rpc Stage(StageRequest) returns (stream StageResponse);
 }
 
 message AttachRequest {
@@ -89,4 +93,37 @@ enum FrameDirection {
   FRAME_DIRECTION_UNSPECIFIED = 0;
   FRAME_DIRECTION_TO_AGENT = 1;
   FRAME_DIRECTION_FROM_AGENT = 2;
+}
+
+message StageRequest {
+  string session = 1;
+}
+
+message StageResponse {
+  oneof part {
+    // Manifest is the first message of the stream, and the only one.
+    StageManifest manifest = 1;
+    // Archive is a piece of the tar stream that follows the manifest, to be
+    // joined in order. The files in it are extracted under the session's
+    // working directory, which is where the paths in it are relative to.
+    bytes archive = 2;
+  }
+}
+
+// StageManifest is what the host does around the agent's start.
+message StageManifest {
+  // The agent's command as gc's start gave it, program name first, split
+  // into words. A path in it is absolute in the pod. What the host does with
+  // it is the agent's business: the host of Claude Code takes the words after
+  // the program as claude's arguments, and ignores the program.
+  repeated string command = 1;
+  // Commands run with sh -c in the working directory, before the agent
+  // starts. One that fails ends the host.
+  repeated string pre_start = 2;
+  // Commands run the same way once the agent's session is up, then the
+  // script, then the live commands. One that fails is logged, not fatal.
+  repeated string session_setup = 3;
+  // The text of a script, run with sh after session_setup.
+  string session_setup_script = 4;
+  repeated string session_live = 5;
 }
