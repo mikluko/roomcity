@@ -165,6 +165,19 @@ func (h *host) run(ctx context.Context) error {
 		return err
 	}
 
+	manifest, err := h.stage(ctx)
+	if err != nil {
+		return err
+	}
+	if err := h.runCommands(ctx, manifest.PreStart, true); err != nil {
+		return err
+	}
+	// The host is Claude Code's: the program of gc's command is not run, only
+	// the words after it are claude's arguments.
+	if len(manifest.Command) > 1 {
+		h.cfg.Claude.ClaudeArgs = append(append([]string(nil), h.cfg.Claude.ClaudeArgs...), manifest.Command[1:]...)
+	}
+
 	// The agent and the host's client of it speak over two pipes, each
 	// tapped where its messages pass.
 	toAgentR, toAgentW := io.Pipe()
@@ -185,8 +198,11 @@ func (h *host) run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Go(func() { h.report(ctx) })
 
-	err := h.session(ctx)
+	err = h.session(ctx)
 	if err == nil {
+		_ = h.runCommands(ctx, manifest.SessionSetup, false)
+		h.runScript(ctx, manifest.SessionSetupScript)
+		_ = h.runCommands(ctx, manifest.SessionLive, false)
 		wg.Go(func() { h.attach(ctx) })
 		select {
 		case <-ctx.Done():

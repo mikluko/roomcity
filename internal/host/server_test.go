@@ -32,6 +32,9 @@ type fakeServer struct {
 	failReports int
 	drops       int // attachments to end, from the first
 	reports     int // Report calls, failed ones too
+	manifest    *roomcityv1.StageManifest
+	archive     []byte
+	stages      int // Stage calls
 }
 
 func newFakeServer(t *testing.T) (*fakeServer, string) {
@@ -175,4 +178,41 @@ func (s *fakeServer) reportCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.reports
+}
+
+// stageWith sets what Stage serves.
+func (s *fakeServer) stageWith(m *roomcityv1.StageManifest, archive []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manifest, s.archive = m, archive
+}
+
+func (s *fakeServer) Stage(_ context.Context, req *connect.Request[roomcityv1.StageRequest], stream *connect.ServerStream[roomcityv1.StageResponse]) error {
+	if sessionauth.Token(req.Header()) != testToken {
+		return connect.NewError(connect.CodeUnauthenticated, nil)
+	}
+	s.mu.Lock()
+	s.stages++
+	m, archive := s.manifest, s.archive
+	s.mu.Unlock()
+	if m == nil {
+		return connect.NewError(connect.CodeUnimplemented, nil)
+	}
+	if err := stream.Send(&roomcityv1.StageResponse{Part: &roomcityv1.StageResponse_Manifest{Manifest: m}}); err != nil {
+		return err
+	}
+	// The archive in two pieces, so that the host has to join them.
+	half := len(archive) / 2
+	for _, chunk := range [][]byte{archive[:half], archive[half:]} {
+		if err := stream.Send(&roomcityv1.StageResponse{Part: &roomcityv1.StageResponse_Archive{Archive: chunk}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *fakeServer) stageCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stages
 }
