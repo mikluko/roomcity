@@ -635,16 +635,28 @@ func (r *Registry) RecordIdentity(ctx context.Context, name string, env map[stri
 // Identity returns the IdentityEnv variables the session's marks hold now, and
 // false for a session whose start did not record them.
 func (r *Registry) Identity(ctx context.Context, name string) (map[string]string, bool, error) {
-	if v, err := r.Mark(ctx, name, identityRecorded); err != nil || v == "" {
+	rows, err := r.db.QueryContext(ctx, `SELECT key, value FROM marks WHERE session = ?`, name)
+	if err != nil {
 		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	marks := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, false, err
+		}
+		marks[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if marks[identityRecorded] == "" {
+		return nil, false, nil
 	}
 	env := map[string]string{}
 	for _, k := range IdentityEnv {
-		v, err := r.Mark(ctx, name, k)
-		if err != nil {
-			return nil, false, err
-		}
-		if v != "" {
+		if v := marks[k]; v != "" {
 			env[k] = v
 		}
 	}
