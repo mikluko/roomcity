@@ -318,3 +318,24 @@ func jobID(t *testing.T, c *fake.Clientset) string {
 	require.Len(t, list.Items, 1)
 	return list.Items[0].Labels["roomcity.sarak.sh/session-id"]
 }
+
+func TestTheJobNeverMakesASecondPodForAFailedStart(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: "guest-1", Agent: "guest", WorkDir: "/w"}))
+	list, err := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	job := list.Items[0]
+
+	// A session that ended is ended: whether to start it again is gc's
+	// decision, never the Job controller's, and a pod that replaced the
+	// failed one would attach as the same session, with a fresh agent
+	// behind gc's back.
+	require.NotNil(t, job.Spec.BackoffLimit)
+	require.Zero(t, *job.Spec.BackoffLimit, "no retry of a failed pod")
+	require.Equal(t, corev1.RestartPolicyNever, job.Spec.Template.Spec.RestartPolicy, "no restart of a failed container")
+	require.Nil(t, job.Spec.PodFailurePolicy, "no rule that ignores a failure and makes another pod")
+	require.Nil(t, job.Spec.Parallelism, "one pod at a time")
+	require.Nil(t, job.Spec.Completions)
+	require.Nil(t, job.Spec.ActiveDeadlineSeconds)
+}

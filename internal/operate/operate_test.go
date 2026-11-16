@@ -819,3 +819,51 @@ func TestAStartFailsAsSoonAsItsPodEndsWithTheReasonAndTheEndOfItsLog(t *testing.
 	require.Contains(t, f.jobs.deleted, "w-1", "the Job is deleted, as for any start that fails")
 	require.Equal(t, "false", string(f.do("is-running", "", "w-1").Stdout))
 }
+
+func TestAProvidersEnvironmentReachesThePodAndWhatThePodHasOfItsOwnDoesNot(t *testing.T) {
+	var logged bytes.Buffer
+	f := newFixture(t, operate.Config{Log: slog.New(slog.NewTextHandler(&logged, nil))})
+
+	cfg := f.startConfig(map[string]any{"nudge": "", "env": map[string]string{
+		"GC_AGENT": "guest", "GC_SESSION_ID": "gc-8",
+		// What city.toml's provider sets for goose.
+		"GOOSE_PROVIDER": "openai", "GOOSE_MODEL": "kimi-for-coding", "GOOSE_MODE": "smart_approve", "OPENAI_HOST": "https://api.kimi.com", "OPENAI_BASE_PATH": "coding/v1/chat/completions",
+		// What the supervisor's process has, and a pod has of its own.
+		"PATH": "/home/linuxbrew/bin", "HOME": "/home/city", "USER": "city", "LOGNAME": "city", "SHELL": "/bin/bash", "PWD": "/home/city/city", "TMPDIR": "/tmp",
+		"XDG_RUNTIME_DIR": "/run/user/1000", "KUBERNETES_SERVICE_HOST": "10.0.0.1", "HOSTNAME": "roomcity-0", "TERM": "dumb", "LANG": "en_US.UTF-8", "LANGUAGE": "en_US", "LC_ALL": "en_US.UTF-8", "LC_CTYPE": "en_US.UTF-8",
+		// gc asking for a variable to be unset, a name that is no variable, and the server's own.
+		"GC_CONTROLLER_TOKEN": "", "not a name": "x", "ROOMCITY_TOKEN": "forged", "ROOMCITY_RUNTIME_URL": "http://127.0.0.1:8082",
+		// A known secret.
+		"GC_DOLT_PASSWORD": "hunter2",
+	}})
+	f.jobs.onCreate = func(spec operate.JobSpec) {
+		go func() {
+			_, err := f.reg.Report(f.ctx, spec.Session, []session.HostFrame{
+				{Seq: 1, Direction: session.ToAgent, Message: []byte(`{"jsonrpc":"2.0","id":1,"method":"session/new"}`)},
+				{Seq: 2, Direction: session.FromAgent, Message: []byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)},
+			})
+			require.NoError(t, err)
+		}()
+	}
+	require.Zero(t, f.do("start", cfg, "guest-1").ExitCode)
+
+	require.Len(t, f.jobs.created, 1)
+	env := f.jobs.created[0].Env
+	for k, v := range map[string]string{
+		"GOOSE_PROVIDER": "openai", "GOOSE_MODEL": "kimi-for-coding", "GOOSE_MODE": "smart_approve", "OPENAI_HOST": "https://api.kimi.com",
+		"OPENAI_BASE_PATH": "coding/v1/chat/completions", "GC_AGENT": "guest", "GC_SESSION_ID": "gc-8",
+		"ROOMCITY_SESSION": "guest-1", "ROOMCITY_SERVER": "http://roomcity.test:8080",
+	} {
+		require.Equal(t, v, env[k], k)
+	}
+	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "TMPDIR", "XDG_RUNTIME_DIR", "KUBERNETES_SERVICE_HOST", "HOSTNAME", "TERM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "GC_CONTROLLER_TOKEN", "not a name", "ROOMCITY_RUNTIME_URL", "GC_DOLT_PASSWORD"} {
+		require.NotContains(t, env, k)
+	}
+	require.NotEqual(t, "forged", env["ROOMCITY_TOKEN"], "what the server sets wins")
+	for _, v := range env {
+		require.NotEqual(t, "hunter2", v, "a known secret is not in the pod's spec")
+	}
+	require.Contains(t, logged.String(), "GC_DOLT_PASSWORD")
+	require.Contains(t, logged.String(), "PATH")
+	require.NotContains(t, logged.String(), "hunter2", "the log names the variable, never its value")
+}

@@ -433,17 +433,16 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 			return fail("start %s: %v", name, err)
 		}
 	}
-	spec := JobSpec{Session: name, Agent: agent, WorkDir: sc.WorkDir, Env: map[string]string{
+	env, heldBack := podEnv(map[string]string{
 		"ROOMCITY_SESSION": name,
 		"ROOMCITY_TOKEN":   token,
 		"ROOMCITY_SERVER":  o.cfg.ServerURL,
 		"ROOMCITY_WORKDIR": sc.WorkDir,
-	}}
-	for k, v := range sc.Env {
-		if strings.HasPrefix(k, "GC_") && v != "" {
-			spec.Env[k] = v
-		}
+	}, sc.Env)
+	if len(heldBack) > 0 {
+		o.cfg.log().Info("variables gc set for the agent that the pod has of its own", "session", name, "left_out", heldBack)
 	}
+	spec := JobSpec{Session: name, Agent: agent, WorkDir: sc.WorkDir, Env: env}
 	if err := o.jobs.Create(ctx, spec); err != nil {
 		return fail("start %s: %v", name, err)
 	}
