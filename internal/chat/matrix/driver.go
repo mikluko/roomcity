@@ -272,9 +272,17 @@ func render(msg chat.Message) event.MessageEventContent {
 	}
 	if content.FormattedBody == "" {
 		content.Format = event.FormatHTML
-		content.FormattedBody = "<p>" + html.EscapeString(msg.Body) + "</p>"
+		if msg.Body != "" {
+			content.FormattedBody = "<p>" + html.EscapeString(msg.Body) + "</p>"
+		}
 	}
-	content.Body += "\n" + f.Text
+	// A message that is only a fold has no words of its own: its summary is
+	// the plain text's first line, and not an empty one.
+	head := content.Body
+	if head == "" {
+		head = f.Summary
+	}
+	content.Body = head + "\n" + f.Text
 	text := html.EscapeString(f.Text)
 	if f.Code {
 		text = "<pre><code>" + text + "</code></pre>"

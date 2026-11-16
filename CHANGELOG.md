@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A message that is only a fold, the agent's thoughts and nothing else, no longer begins with an empty line in its plain text, which a client that does not show HTML shows open, nor with an empty paragraph in its HTML: the plain text begins with the fold's summary ("💭 Thinking"), and the HTML with the fold.
+
 ## [0.5.0] - 2026-11-16
 
 ### Fixed
