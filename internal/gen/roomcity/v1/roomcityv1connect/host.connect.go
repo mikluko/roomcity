@@ -41,6 +41,8 @@ const (
 	HostServiceStageProcedure = "/roomcity.v1.HostService/Stage"
 	// HostServiceHandledProcedure is the fully-qualified name of the HostService's Handled RPC.
 	HostServiceHandledProcedure = "/roomcity.v1.HostService/Handled"
+	// HostServiceSendProcedure is the fully-qualified name of the HostService's Send RPC.
+	HostServiceSendProcedure = "/roomcity.v1.HostService/Send"
 )
 
 // HostServiceClient is a client for the roomcity.v1.HostService service.
@@ -60,6 +62,9 @@ type HostServiceClient interface {
 	// Handled tells the server what the host did with a prompt it was handed,
 	// so that the room can show a prompt that waits for the running turn's end.
 	Handled(context.Context, *connect.Request[v1.HandledRequest]) (*connect.Response[v1.HandledResponse], error)
+	// Send hands the server a file of the session's working directory to put
+	// in the session's room, and answers with the room's event for it.
+	Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error)
 }
 
 // NewHostServiceClient constructs a client for the roomcity.v1.HostService service. By default, it
@@ -97,6 +102,12 @@ func NewHostServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(hostServiceMethods.ByName("Handled")),
 			connect.WithClientOptions(opts...),
 		),
+		send: connect.NewClient[v1.SendRequest, v1.SendResponse](
+			httpClient,
+			baseURL+HostServiceSendProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Send")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -106,6 +117,7 @@ type hostServiceClient struct {
 	report  *connect.Client[v1.ReportRequest, v1.ReportResponse]
 	stage   *connect.Client[v1.StageRequest, v1.StageResponse]
 	handled *connect.Client[v1.HandledRequest, v1.HandledResponse]
+	send    *connect.Client[v1.SendRequest, v1.SendResponse]
 }
 
 // Attach calls roomcity.v1.HostService.Attach.
@@ -128,6 +140,11 @@ func (c *hostServiceClient) Handled(ctx context.Context, req *connect.Request[v1
 	return c.handled.CallUnary(ctx, req)
 }
 
+// Send calls roomcity.v1.HostService.Send.
+func (c *hostServiceClient) Send(ctx context.Context, req *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error) {
+	return c.send.CallUnary(ctx, req)
+}
+
 // HostServiceHandler is an implementation of the roomcity.v1.HostService service.
 type HostServiceHandler interface {
 	// Attach opens the stream of instructions for one session. A host that
@@ -145,6 +162,9 @@ type HostServiceHandler interface {
 	// Handled tells the server what the host did with a prompt it was handed,
 	// so that the room can show a prompt that waits for the running turn's end.
 	Handled(context.Context, *connect.Request[v1.HandledRequest]) (*connect.Response[v1.HandledResponse], error)
+	// Send hands the server a file of the session's working directory to put
+	// in the session's room, and answers with the room's event for it.
+	Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error)
 }
 
 // NewHostServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -178,6 +198,12 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(hostServiceMethods.ByName("Handled")),
 		connect.WithHandlerOptions(opts...),
 	)
+	hostServiceSendHandler := connect.NewUnaryHandler(
+		HostServiceSendProcedure,
+		svc.Send,
+		connect.WithSchema(hostServiceMethods.ByName("Send")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/roomcity.v1.HostService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HostServiceAttachProcedure:
@@ -188,6 +214,8 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 			hostServiceStageHandler.ServeHTTP(w, r)
 		case HostServiceHandledProcedure:
 			hostServiceHandledHandler.ServeHTTP(w, r)
+		case HostServiceSendProcedure:
+			hostServiceSendHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -211,4 +239,8 @@ func (UnimplementedHostServiceHandler) Stage(context.Context, *connect.Request[v
 
 func (UnimplementedHostServiceHandler) Handled(context.Context, *connect.Request[v1.HandledRequest]) (*connect.Response[v1.HandledResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Handled is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Send is not implemented"))
 }

@@ -23,6 +23,9 @@ service HostService {
   // Handled tells the server what the host did with a prompt it was handed,
   // so that the room can show a prompt that waits for the running turn's end.
   rpc Handled(HandledRequest) returns (HandledResponse);
+  // Send hands the server a file of the session's working directory to put
+  // in the session's room, and answers with the room's event for it.
+  rpc Send(SendRequest) returns (SendResponse);
 }
 
 message AttachRequest {
@@ -87,6 +90,22 @@ message HandledRequest {
 }
 
 message HandledResponse {}
+
+message SendRequest {
+  string session = 1;
+  // The file's name, without a directory.
+  string name = 2;
+  // The file's media type, as the host knows it from the name and the content.
+  string media_type = 3;
+  // What the owner reads with it; may be empty.
+  string caption = 4;
+  bytes data = 5;
+}
+
+message SendResponse {
+  // The room's event that carries the file.
+  string event = 1;
+}
 
 // Handling is what became of a prompt in the host.
 enum Handling {

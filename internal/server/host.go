@@ -136,6 +136,15 @@ func (h *Host) Handled(ctx context.Context, req *connect.Request[roomcityv1.Hand
 	return connect.NewResponse(&roomcityv1.HandledResponse{}), nil
 }
 
+// Send answers Unimplemented: the server's side of a file sent to the room
+// is not here yet.
+func (h *Host) Send(ctx context.Context, req *connect.Request[roomcityv1.SendRequest]) (*connect.Response[roomcityv1.SendResponse], error) {
+	if err := h.authorize(req.Msg.Session, req.Header()); err != nil {
+		return nil, err
+	}
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the server does not take a file for the room yet"))
+}
+
 // Stage sends the bundle of the session's start: the manifest, then the
 // archive in pieces. A start that kept no bundle gets an empty manifest.
 func (h *Host) Stage(ctx context.Context, req *connect.Request[roomcityv1.StageRequest], stream *connect.ServerStream[roomcityv1.StageResponse]) error {
