@@ -452,3 +452,17 @@ func TestRendererForgetsAPromptOnceItIsDelivered(t *testing.T) {
 	r.event(session.Prompt{Seq: 6, State: session.Delivered, Of: 5})
 	require.Equal(t, []uint64{5}, out.forgotten)
 }
+
+func TestRendererAsksNothingOfARequestTheHostAnsweredItself(t *testing.T) {
+	r, out, _ := newTestRenderer()
+	r.event(update("agent_message_chunk", `"content":{"type":"text","text":"Unfinished"}`))
+	r.event(fromAgent(`{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","title":"attach","_meta":{"roomcity":{"answeredBy":"host"}}},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}`))
+
+	require.Equal(t, []string{"Unfinished"}, bodies(out.sent), "the text before it is shown, and no question follows")
+	require.Empty(t, out.reactions)
+	r.event(update("tool_call", `"toolCallId":"t","title":"attach","status":"pending","rawInput":{"path":"a.png"}`))
+	require.Equal(t, []string{"Unfinished", "🔧 **attach**"}, bodies(out.sent), "the tool call is shown as any other")
+
+	r.event(permissionRequest("8", "Run it"))
+	require.Contains(t, out.sent[len(out.sent)-1].Body, "Permission needed", "a request the host did not answer is still asked")
+}

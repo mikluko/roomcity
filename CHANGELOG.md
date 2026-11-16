@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The database is of schema version 4: a session's stream may hold a `File` event, a file the session sent to its room, which the transcript page and the raw stream show. A server of version 3 refuses a database of version 4 rather than fail on a transcript that holds one. The step from 3 changes only the version.
+- A permission request that the host answered itself, as it does for the agent's leave to use the room's own tools (`_meta.roomcity.answeredBy` is `"host"` in the call), is not posted to the room as a question with reactions. The tool call it was for shows as any other.
 
 ## [0.8.0] - 2026-11-16
 

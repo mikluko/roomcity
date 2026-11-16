@@ -173,8 +173,10 @@ func (r *renderer) frame(f session.Frame) {
 	case m.Method == "session/request_permission":
 		r.endThoughts()
 		r.sendAll(r.feedAnswer(f))
-		r.flushPlan()
-		r.permissionRequest(m)
+		if !answeredByHost(m) {
+			r.flushPlan()
+			r.permissionRequest(m)
+		}
 	case m.Method == "" && m.Result != nil && m.Result.StopReason != "":
 		r.endTurn()
 	case m.Method == "" && m.Error != nil && r.promptID != "" && string(m.ID) == r.promptID:
@@ -642,6 +644,16 @@ func permissionKey(kind string) string {
 		return "🚫"
 	}
 	return "❔"
+}
+
+// answeredByHost says whether the host answered the request itself, as it
+// does for the agent's leave to use the room's own tools: the copy that reaches
+// the server says so in the call's _meta, and the room has nothing to ask.
+func answeredByHost(m rpc) bool {
+	meta, _ := m.Params.ToolCall["_meta"].(map[string]any)
+	roomcity, _ := meta["roomcity"].(map[string]any)
+	by, _ := roomcity["answeredBy"].(string)
+	return by == "host"
 }
 
 func (r *renderer) permissionRequest(m rpc) {
