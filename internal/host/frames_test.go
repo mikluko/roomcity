@@ -55,3 +55,27 @@ func TestAcknowledgeForgetsUpToSeq(t *testing.T) {
 	rec.acknowledge(1) // late and smaller: nothing returns
 	require.Len(t, rec.unacknowledged(10), 2)
 }
+
+// answeringWriter is a pipe whose reader answers as soon as it has read, before
+// the write returns, as an agent does.
+type answeringWriter struct {
+	rec *recorder
+}
+
+func (a answeringWriter) Write(p []byte) (int, error) {
+	a.rec.add(roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT, []byte(`{"answer":true}`))
+	return len(p), nil
+}
+
+func TestARequestIsNumberedBeforeItsAnswer(t *testing.T) {
+	rec := newRecorder(time.Now)
+	w := newTapWriter(answeringWriter{rec}, rec, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT)
+
+	_, err := w.Write([]byte("{\"request\":true}\n"))
+	require.NoError(t, err)
+
+	got := rec.unacknowledged(10)
+	require.Len(t, got, 2)
+	require.Equal(t, `{"request":true}`, string(got[0].Message))
+	require.Equal(t, `{"answer":true}`, string(got[1].Message))
+}

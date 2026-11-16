@@ -91,8 +91,11 @@ func (l *lines) write(p []byte) {
 	}
 }
 
-// tapWriter passes writes on to w, then records each complete message in
-// them.
+// tapWriter records each complete message in what it is given, then passes
+// the write on to w. The order matters: a write to a pipe returns only once
+// the agent has read, and the agent's answer may be recorded by the other tap
+// before that, so a request recorded after its write could be numbered after
+// its own answer.
 type tapWriter struct {
 	w io.Writer
 	l lines
@@ -103,9 +106,8 @@ func newTapWriter(w io.Writer, rec *recorder, dir roomcityv1.FrameDirection) *ta
 }
 
 func (t *tapWriter) Write(p []byte) (int, error) {
-	n, err := t.w.Write(p)
-	t.l.write(p[:n])
-	return n, err
+	t.l.write(p)
+	return t.w.Write(p)
 }
 
 // tapReader records each complete message in what r yields, as it yields it.
