@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"sarak.sh/mikluko/roomcity/internal/roomtool"
 	"sarak.sh/mikluko/roomcity/internal/session"
 )
 
@@ -33,6 +34,8 @@ const (
 	maxToolOutput = 4000
 	// maxPermissionDetail is the part of a diff a permission request shows.
 	maxPermissionDetail = 1500
+	// maxRoomTask is the part of a task's first line a work notice shows.
+	maxRoomTask = 160
 	// closedFor is how long a reaction on a permission request that is over
 	// is still told so.
 	closedFor  = time.Hour
@@ -375,6 +378,8 @@ func (r *renderer) tick() {
 type tool struct {
 	title, kind, status string
 	name                string
+	work                string
+	input               map[string]any
 	output, diff        string
 	// denial is "cancelled" or "refused" when the call ended without its
 	// permission, and its output is the agent's own account of that.
@@ -396,11 +401,15 @@ func (r *renderer) toolUpdate(u map[string]any) {
 		t.denial = r.denied[id]
 		delete(r.denied, id)
 	}
-	if t.started == "" && (toolKnown(u) || ended) {
+	if t.work == "" && t.started == "" && (toolKnown(u) || ended) {
 		t.started = r.send(Message{Kind: Notice, Body: "🔧 **" + t.label() + "**"})
 	}
-	if ended && t.started != "" {
-		r.send(t.result())
+	if ended {
+		if t.work != "" {
+			r.send(t.workResult())
+		} else if t.started != "" {
+			r.send(t.result())
+		}
 		delete(r.tools, id)
 	}
 }
@@ -415,7 +424,41 @@ func (t *tool) label() string {
 	return t.name
 }
 
+// roomWorkTools maps the two agents' metadata names to the room's work tools.
+// A display title is not evidence of a tool's name or server.
+var roomWorkTools = map[string]string{
+	"mcp__room__dispatch": "dispatch",
+	"mcp__room__wait":     "wait",
+	"mcp__room__result":   "result",
+	"mcp__room__claim":    "claim",
+	"mcp__room__done":     "done",
+	"room__dispatch":      "dispatch",
+	"room__wait":          "wait",
+	"room__result":        "result",
+	"room__claim":         "claim",
+	"room__done":          "done",
+}
+
+func roomWorkTool(u map[string]any) string {
+	meta, _ := u["_meta"].(map[string]any)
+	cc, _ := meta["claudeCode"].(map[string]any)
+	name, _ := cc["toolName"].(string)
+	if work := roomWorkTools[name]; work != "" {
+		return work
+	}
+	goose, _ := meta["goose"].(map[string]any)
+	call, _ := goose["toolCall"].(map[string]any)
+	name, _ = call["toolName"].(string)
+	return roomWorkTools[name]
+}
+
 func (t *tool) merge(u map[string]any) {
+	if work := roomWorkTool(u); work != "" {
+		t.work = work
+	}
+	if input, ok := u["rawInput"].(map[string]any); ok && len(input) > 0 {
+		t.input = input
+	}
 	if v, ok := u["title"].(string); ok && v != "" {
 		t.title = v
 	}
@@ -486,6 +529,85 @@ func (t *tool) result() Message {
 	return m
 }
 
+// workResult says what a completed room work tool did, or which act failed.
+func (t *tool) workResult() Message {
+	m := t.result()
+	if t.status == "failed" || t.denial != "" {
+		m.Body = "❌ " + t.workFailure()
+		return m
+	}
+	output := unfence(t.output)
+	switch t.work {
+	case "dispatch":
+		m.Body = "Handed to a worker"
+		if task := taskLine(t.argument("task"), maxRoomTask); task != "" {
+			m.Body += ": " + task
+		}
+		if id := roomtool.DispatchedTask(output); id != "" {
+			m.Body += " (task " + id + ")"
+		}
+		m.Fold = nil
+	case "wait":
+		m.Body = "Waiting to be told when " + taskRef(t.argument("task")) + " is closed"
+		m.Fold = nil
+	case "result":
+		m.Body = "Read the result of " + taskRef(t.argument("task"))
+	case "claim":
+		if output == roomtool.NoTaskAnswer {
+			m.Body = "No task to take; its session is ending"
+			m.Fold = nil
+			break
+		}
+		id, task, ok := roomtool.ClaimedTask(output)
+		if !ok {
+			m.Body = "❌ Could not take a task"
+			return m
+		}
+		m.Body = "Took task " + id + ": " + taskLine(task, maxRoomTask)
+		m.Fold = nil
+	case "done":
+		m.Body = "Closed its task with the result"
+		m.Fold = nil
+		if result := t.argument("result"); result != "" {
+			m.Fold = &Fold{Summary: "output", Text: cut(result, t.limit), Code: true}
+		}
+	}
+	return m
+}
+
+func (t *tool) workFailure() string {
+	switch t.work {
+	case "dispatch":
+		body := "Could not hand to a worker"
+		if task := taskLine(t.argument("task"), maxRoomTask); task != "" {
+			body += ": " + task
+		}
+		return body
+	case "wait":
+		return "Could not wait for " + taskRef(t.argument("task"))
+	case "result":
+		return "Could not read the result of " + taskRef(t.argument("task"))
+	case "claim":
+		return "Could not take a task"
+	case "done":
+		return "Could not close its task"
+	default:
+		return "The tool call failed"
+	}
+}
+
+func (t *tool) argument(name string) string {
+	value, _ := t.input[name].(string)
+	return value
+}
+
+func taskRef(id string) string {
+	if id == "" {
+		return "the task"
+	}
+	return "task " + id
+}
+
 func diffText(cm map[string]any) string {
 	oldT, _ := cm["oldText"].(string)
 	newT, _ := cm["newText"].(string)
@@ -512,6 +634,19 @@ func unfence(s string) string {
 		s = s[i+1:]
 	}
 	return strings.TrimSpace(s)
+}
+
+// taskLine keeps the first line of a task, cut at a rune boundary.
+func taskLine(s string, limit int) string {
+	line, _, _ := strings.Cut(s, "\n")
+	line = strings.TrimSpace(line)
+	if limit <= 0 || len(line) <= limit {
+		return line
+	}
+	for limit > 0 && !isRuneStart(line[limit]) {
+		limit--
+	}
+	return strings.TrimSpace(line[:limit]) + "…"
 }
 
 // cut keeps the first n bytes of s, at a rune boundary, marking the cut; with

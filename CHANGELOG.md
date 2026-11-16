@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated: github.com/yuin/goldmark v1.8.7.
 - The `examples/minimal` city has a Claude Code `foreman` that hands work to goose `worker` sessions through the room's tools, replacing the always-on `host` and `guest`.
+- The room reads `Handed to a worker: … (task …)`, `Waiting to be told when task … is closed`, `Read the result of task …`, `Took task …: …` and `Closed its task with the result` for its work tools, instead of the agents' tool names and generic done notices.
 
 ## [0.12.0] - 2026-11-16
 

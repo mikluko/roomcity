@@ -22,6 +22,7 @@ import (
 
 	"sarak.sh/mikluko/roomcity/internal/config"
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
+	"sarak.sh/mikluko/roomcity/internal/roomtool"
 )
 
 // roomServerName is the name the agent knows the host's tools by: goose shows
@@ -285,7 +286,7 @@ func (r *room) dispatch(ctx context.Context, _ *mcp.CallToolRequest, in dispatch
 	if err != nil {
 		return refused(fmt.Errorf("the task was not handed to a worker: %s", reason(err))), nil, nil
 	}
-	return said("Handed to a worker as task " + res.Msg.TaskId + "."), nil, nil
+	return said(roomtool.DispatchAnswer(res.Msg.TaskId)), nil, nil
 }
 
 func (r *room) wait(ctx context.Context, _ *mcp.CallToolRequest, in taskArgs) (*mcp.CallToolResult, any, error) {
@@ -344,9 +345,9 @@ func (r *room) claim(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mc
 		return refused(fmt.Errorf("no task could be claimed: %s", reason(err))), nil, nil
 	}
 	if !res.Msg.Found {
-		return said("There is no task for you; this session is ending."), nil, nil
+		return said(roomtool.NoTaskAnswer), nil, nil
 	}
-	return said("Task " + res.Msg.TaskId + ":\n" + res.Msg.Text), nil, nil
+	return said(roomtool.ClaimAnswer(res.Msg.TaskId, res.Msg.Text)), nil, nil
 }
 
 func isCommitID(s string) bool {
