@@ -136,6 +136,8 @@ type host struct {
 	// room serves the agent the room's tools; nil when the agent takes no
 	// http MCP server.
 	room *room
+	// own tells the permission requests that are for the room's own tools.
+	own *ownRequests
 	// fatalErr is what ended the host when it was not a stop.
 	fatalErr error
 }
@@ -162,6 +164,7 @@ func newHost(cfg Config) *host {
 		client:  roomcityv1connect.NewHostServiceClient(httpClient, cfg.Server, sessionauth.Client(cfg.Token)),
 		pending: map[string]chan string{},
 		wake:    make(chan struct{}, 1),
+		own:     newOwnRequests(),
 	}
 }
 
@@ -196,7 +199,7 @@ func (h *host) run(ctx context.Context) error {
 	// The host's client of the agent speaks to it over its streams, each
 	// tapped where its messages pass.
 	conn := acp.NewAgentConn(
-		newTapReader(ag.r, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT),
+		newTapReader(ag.r, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT, h.own.see),
 		newTapWriter(ag.w, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT),
 		func(*acp.AgentConn) acp.Client { return &agentClient{h: h} },
 	)

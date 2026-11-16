@@ -249,8 +249,8 @@ func (c *collector) RequestPermission(_ context.Context, req *acp.RequestPermiss
 	return &acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.SelectedPermissionOutcome{OptionID: req.Options[0].OptionID}}}, nil
 }
 
-// The room's tool attach, called by the real goose: its request for leave is
-// the one the host will answer itself, and the file reaches the server.
+// The room's tool attach, called by the real goose: the host answers its
+// request for leave itself, and the file reaches the server.
 func TestRealGooseAttachesAFileThroughTheRoom(t *testing.T) {
 	gooseEnv(t)
 	dir := t.TempDir()
@@ -258,19 +258,12 @@ func TestRealGooseAttachesAFileThroughTheRoom(t *testing.T) {
 	server, stop := gooseHostIn(t, dir)
 	defer stop()
 
-	server.instruct(prompt("Use the attach tool of the room server to send the file chart.png to the room, with the caption hi. Then say what it answered."))
-	var asked wire
-	server.eventuallyWithin(t, time.Minute, "a permission request", func(fs []*roomcityv1.Frame) bool {
-		w, ok := permissionRequest(t, fs)
-		asked = w
-		return ok
-	})
-	t.Logf("permission request: %.400s", asked.Params)
-	server.instruct(&roomcityv1.AttachResponse{Instruction: &roomcityv1.AttachResponse_PermissionAnswer{
-		PermissionAnswer: &roomcityv1.PermissionAnswer{RequestId: string(asked.ID), OptionId: "allow_once"},
-	}})
+	server.instruct(prompt("Call your attach tool (from the room extension, called room__attach) with path chart.png and caption hi. Do not use any other tool. Then say what it answered."))
 	server.eventuallyWithin(t, time.Minute, "the turn's end", func(fs []*roomcityv1.Frame) bool { return len(stopReasons(t, fs)) > 0 })
 
+	request, ok := permissionRequest(t, server.stored())
+	require.True(t, ok, "goose asked leave")
+	require.Contains(t, string(request.Params), `"answeredBy":"host"`)
 	sent := server.sentFiles()
 	require.Len(t, sent, 1)
 	require.Equal(t, "chart.png", sent[0].Name)

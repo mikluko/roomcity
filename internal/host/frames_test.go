@@ -16,7 +16,7 @@ func TestTapsRecordWholeMessagesInOrderWithTheirDirection(t *testing.T) {
 	rec := newRecorder(func() time.Time { return at })
 	var toAgent bytes.Buffer
 	w := newTapWriter(&toAgent, rec, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT)
-	r := newTapReader(bytes.NewReader([]byte("{\"b\":1}\n{\"c\"")), rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT)
+	r := newTapReader(bytes.NewReader([]byte("{\"b\":1}\n{\"c\"")), rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT, nil)
 
 	// A message split over two writes is one frame, and two in one write
 	// are two.

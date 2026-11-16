@@ -55,6 +55,15 @@ func (a *helperAgent) useRoom(ctx context.Context, req *acp.PromptRequest) (*acp
 		say("no room server given")
 		return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
+	asked, err := a.conn.RequestPermission(ctx, &acp.RequestPermissionRequest{
+		SessionID: req.SessionID,
+		ToolCall:  acp.ToolCallUpdate{ToolCallID: "t1", Meta: map[string]any{"claudeCode": map[string]any{"toolName": "mcp__room__attach"}}},
+		Options:   []acp.PermissionOption{{OptionID: "yes", Name: "Yes", Kind: acp.PermissionOptionKindAllowOnce}},
+	})
+	if err != nil || asked.Outcome.Selected == nil || asked.Outcome.Selected.OptionID != "yes" {
+		say("leave refused")
+		return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
 	h := a.servers[0].HTTP
 	header := map[string]string{}
 	for _, kv := range h.Headers {
@@ -263,4 +272,8 @@ func TestAnAgentThatTakesHttpMCPServersGetsTheRoomAndItsFileReachesTheServer(t *
 		text += string(f.Message)
 	}
 	require.Contains(t, text, "chart.png is in the room")
+
+	request, ok := permissionRequest(t, server.stored())
+	require.True(t, ok)
+	require.Contains(t, string(request.Params), `"answeredBy":"host"`, "the server is told who answered")
 }

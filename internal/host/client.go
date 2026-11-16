@@ -19,15 +19,21 @@ type agentClient struct {
 // the report.
 func (*agentClient) SessionUpdate(context.Context, *acp.SessionNotification) error { return nil }
 
-// RequestPermission waits for the PermissionAnswer that names this request by
+// RequestPermission answers a request for one of the room's own tools at once,
+// allowing the call once, and for any other waits for the PermissionAnswer that names this request by
 // its JSON-RPC id. An answer with no option, or the end of the connection,
 // cancels it.
-func (c *agentClient) RequestPermission(ctx context.Context, _ *acp.RequestPermissionRequest) (*acp.RequestPermissionResponse, error) {
+func (c *agentClient) RequestPermission(ctx context.Context, req *acp.RequestPermissionRequest) (*acp.RequestPermissionResponse, error) {
 	raw, ok := acp.RequestIDFromContext(ctx)
 	if !ok {
 		return &acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: true}}, nil
 	}
 	id := string(raw)
+	if c.h.own.isOwn(id) {
+		if option := allowOnce(req.Options); option != "" {
+			return &acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.SelectedPermissionOutcome{OptionID: option}}}, nil
+		}
+	}
 	ch := make(chan string, 1)
 	c.h.mu.Lock()
 	c.h.pending[id] = ch

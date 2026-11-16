@@ -116,8 +116,15 @@ type tapReader struct {
 	l lines
 }
 
-func newTapReader(r io.Reader, rec *recorder, dir roomcityv1.FrameDirection) *tapReader {
-	return &tapReader{r: r, l: lines{emit: func(m []byte) { rec.add(dir, m) }}}
+// as, when given, is what each message becomes in the record; the reader's
+// reader gets it as it was.
+func newTapReader(r io.Reader, rec *recorder, dir roomcityv1.FrameDirection, as func([]byte) []byte) *tapReader {
+	return &tapReader{r: r, l: lines{emit: func(m []byte) {
+		if as != nil {
+			m = as(m)
+		}
+		rec.add(dir, m)
+	}}}
 }
 
 func (t *tapReader) Read(p []byte) (int, error) {
