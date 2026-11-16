@@ -124,9 +124,11 @@ func Run(ctx context.Context, o Options) error {
 	s := server.New()
 	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg}))
 	s.Handle(roomcityv1connect.NewGcServiceHandler(gchandler.New(gchandler.Config{
-		CityDir:   cfg.Server.CityDir,
-		GcPath:    cfg.Server.Gc,
-		Authorize: reg.Authorize,
+		CityDir:    cfg.Server.CityDir,
+		GcPath:     cfg.Server.Gc,
+		Authorize:  reg.Authorize,
+		RuntimeURL: "http://" + o.Listeners.Runtime.Addr().String(),
+		Log:        log,
 	})))
 	s.HandleRuntime(roomcityv1connect.NewRuntimeServiceHandler(operate.New(reg, o.Jobs, operate.Config{
 		ServerURL:    cfg.Server.URL,

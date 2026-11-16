@@ -31,7 +31,7 @@ func server(t *testing.T, body string) string {
 }
 
 func TestRunReturnsWhatTheServersGcPrinted(t *testing.T) {
-	url := server(t, `printf 'args:%s|stdin:%s|GC_X:%s|HOME:%s' "$*" "$(cat)" "$GC_X" "${HOME-unset}"; printf warn >&2; exit 4`)
+	url := server(t, `printf 'args:%s|stdin:%s|GC_AGENT:%s|HOME:%s' "$*" "$(cat)" "$GC_AGENT" "${HOME-unset}"; printf warn >&2; exit 4`)
 	var stdout, stderr bytes.Buffer
 
 	code := Run(context.Background(), Config{Session: "s", Token: "tok", Server: url},
@@ -39,12 +39,12 @@ func TestRunReturnsWhatTheServersGcPrinted(t *testing.T) {
 		Streams{
 			Stdin:  strings.NewReader("payload"),
 			Stdout: &stdout, Stderr: &stderr,
-			Env: []string{"GC_X=1", "HOME=/home/city", "PATH=/bin"},
+			Env: []string{"GC_AGENT=1", "HOME=/home/city", "PATH=/bin"},
 			Dir: "/home/city/work",
 		})
 
 	require.Equal(t, 4, code)
-	require.Equal(t, "args:nudge drain --inject|stdin:payload|GC_X:1|HOME:unset", stdout.String())
+	require.Equal(t, "args:nudge drain --inject|stdin:payload|GC_AGENT:1|HOME:unset", stdout.String())
 	require.Equal(t, "warn", stderr.String())
 }
 

@@ -1,7 +1,9 @@
 package gchandler
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,4 +135,36 @@ func TestRunRefusesAnEmptySessionOrTokenWhateverAuthorizeSays(t *testing.T) {
 		require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), name)
 	}
 	require.NoFileExists(t, ran)
+}
+
+func TestRunGivesGcTheServersRuntimeAndTheCityAndTakesOnlyIdentityFromTheSession(t *testing.T) {
+	gc := fakeGc(t, `echo "$ROOMCITY_RUNTIME_URL|$GC_CITY|$GC_CITY_PATH|$GC_DOLT_PASSWORD|$GC_AGENT|$GC_SESSION_ID|$GC_INSTANCE_TOKEN,$GC_CONTINUATION_EPOCH,$GC_RUNTIME_EPOCH,$GC_PROVIDER,$GC_STARTUP_PROMPT_DELIVERED|[$GC_SESSION][$GC_BEADS][$GC_HOME][$GC_DIR][$GC_STORE_ROOT]"`)
+	h := New(Config{
+		CityDir: t.TempDir(), GcPath: gc, Authorize: authorize, RuntimeURL: "http://127.0.0.1:8082",
+		Env: []string{"ROOMCITY_RUNTIME_URL=http://elsewhere", "GC_CITY=/city", "GC_DOLT_PASSWORD=real", "GC_HOME=/server-home"},
+	})
+
+	res := run(t, h, &roomcityv1.RunRequest{Session: "s", Env: map[string]string{
+		"ROOMCITY_RUNTIME_URL": "http://evil", "GC_CITY": "/evil", "GC_CITY_PATH": "/evil", "GC_DOLT_PASSWORD": "evil",
+		"GC_SESSION": "exec:/evil", "GC_BEADS": "exec:/evil", "GC_HOME": "/evil", "GC_DIR": "/evil", "GC_STORE_ROOT": "/evil",
+		"GC_AGENT": "guest", "GC_SESSION_ID": "gc-8",
+		"GC_INSTANCE_TOKEN": "t", "GC_CONTINUATION_EPOCH": "2", "GC_RUNTIME_EPOCH": "3", "GC_PROVIDER": "claude", "GC_STARTUP_PROMPT_DELIVERED": "1",
+	}})
+
+	require.Equal(t, "http://127.0.0.1:8082|/city||real|guest|gc-8|t,2,3,claude,1|[][][/server-home][][]\n", string(res.Stdout))
+}
+
+func TestRunLogsTheCommandAndItsExitAndNothingMore(t *testing.T) {
+	var logged bytes.Buffer
+	h := New(Config{CityDir: t.TempDir(), GcPath: fakeGc(t, `echo typed-output; exit 1`), Authorize: authorize,
+		Log: slog.New(slog.NewTextHandler(&logged, nil))})
+
+	run(t, h, &roomcityv1.RunRequest{Session: "s", Args: []string{"session", "kill", "guest"}})
+	run(t, h, &roomcityv1.RunRequest{Session: "s", Args: []string{"nudge", "Hello there, secret"}})
+
+	require.Contains(t, logged.String(), `session=s command="session kill" exit=1`)
+	require.Contains(t, logged.String(), `command=nudge `)
+	for _, leak := range []string{"guest", "secret", "typed-output"} {
+		require.NotContains(t, logged.String(), leak)
+	}
 }

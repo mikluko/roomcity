@@ -58,6 +58,8 @@ Who can read a session's Secret: whoever may read Secrets in the namespace, whic
 A server that lacks the right fails the start and says so; it does not fall back to a plain environment.
 So an API key put in `city.toml`'s `env` reaches the pod and is readable by the namespace's readers of Secrets, and not by its readers of Jobs.
 
+Through gc a session can do everything gc's command line does in the city, stopping and starting the other sessions included: the server runs gc for it, in the city, with the server's own environment, and takes from the session only the variables by which gc knows who is calling (`GC_AGENT`, `GC_ALIAS`, `GC_SESSION_ID`, `GC_SESSION_NAME`, `GC_TEMPLATE`, `GC_SESSION_ORIGIN`, `GC_INSTANCE_TOKEN`, `GC_CONTINUATION_EPOCH`, `GC_RUNTIME_EPOCH`, `GC_PROVIDER`, `GC_STARTUP_PROMPT_DELIVERED`).
+
 Two limits, from the server's not being able to read or list Secrets:
 
 - A server that dies between making a session's Secret and making its Job leaves a Secret that nothing owns. The server cannot list Secrets to find it; the next start of the same session overwrites it and a stop of that name deletes it, and otherwise it stays until someone deletes it.

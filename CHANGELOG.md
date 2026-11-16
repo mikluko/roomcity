@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gc the server runs for a session is told the server's own runtime address, `ROOMCITY_RUNTIME_URL`, from the listener the server opened, so `gc session kill`, `reset`, `peek`, `new` and a nudge to another session no longer fail with "ROOMCITY_RUNTIME_URL is not set". Of a session's variables, the server's gc takes only the eleven by which gc knows who is calling (`GC_AGENT`, `GC_ALIAS`, `GC_SESSION_ID`, `GC_SESSION_NAME`, `GC_TEMPLATE`, `GC_SESSION_ORIGIN`, `GC_INSTANCE_TOKEN`, `GC_CONTINUATION_EPOCH`, `GC_RUNTIME_EPOCH`, `GC_PROVIDER`, `GC_STARTUP_PROMPT_DELIVERED`); the rest, the runtime's address, the city, the store, the Dolt and the providers `GC_SESSION` and `GC_BEADS` among them, are the server's, where a session could replace any `GC_*` before.
 - The journal's "began anew" notice, and the room's, for an always-on agent whose session had ended before the server started: the chat side did not follow an ended session, so the next start, which the registry writes to the session's stream before the watch tells anyone of it, was behind the subscription's cursor and was never shown. It follows every agent session from the first time it sees it, ended or not.
+
+### Added
+
+- The server logs one line for each gc command it runs for a session: the session, the command and subcommand, the exit code and the time taken, and never the arguments past them nor the output.
 
 ## [0.4.0] - 2026-11-16
 
