@@ -185,6 +185,9 @@ func (c *Config) validate() error {
 		if err := sec.Validate(); err != nil {
 			return fmt.Errorf("kube.secrets[%d]: %w", i, err)
 		}
+		if err := c.Kube.CheckMount(sec); err != nil {
+			return fmt.Errorf("kube.secrets[%d]: %w", i, err)
+		}
 	}
 	for agent, a := range c.Agents {
 		if _, err := path.Match(agent, ""); err != nil {
@@ -195,6 +198,9 @@ func (c *Config) validate() error {
 		}
 		for i, sec := range a.Secrets {
 			if err := sec.Validate(); err != nil {
+				return fmt.Errorf("agents.%s.secrets[%d]: %w", agent, i, err)
+			}
+			if err := c.Kube.CheckMount(sec); err != nil {
 				return fmt.Errorf("agents.%s.secrets[%d]: %w", agent, i, err)
 			}
 		}

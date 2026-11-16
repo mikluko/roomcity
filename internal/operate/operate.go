@@ -55,6 +55,9 @@ type Jobs interface {
 	// DeleteObject deletes the session's Job if it is the one with that id,
 	// and reports whether it did.
 	DeleteObject(ctx context.Context, session, id string) (bool, error)
+	// Failure says why the session's pod ended: what the cluster reports of
+	// it and the last lines of its log, in a few lines.
+	Failure(ctx context.Context, session string) (string, error)
 }
 
 // JobSpec is what a session's Job is made from.
@@ -77,6 +80,9 @@ type Config struct {
 	// StartTimeout is how long start waits for the host to attach and the
 	// agent to answer session/new; 0 is 100 seconds, inside gc's 120.
 	StartTimeout time.Duration
+	// PollEvery is how often start looks at its pod while it waits; 0 is a
+	// second.
+	PollEvery time.Duration
 	// StopGrace is how long stop waits for the host to take the Stop
 	// instruction before it deletes the Job; 0 is 5 seconds.
 	StopGrace time.Duration
@@ -444,13 +450,51 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 
 	wait, cancel := context.WithTimeout(ctx, o.cfg.StartTimeout)
 	defer cancel()
-	switch err := o.reg.WaitRunning(wait, name); {
-	case err == nil:
-		return ok("")
-	case errors.Is(err, context.DeadlineExceeded):
-		return fail("start %s: the session did not come up within %s", name, o.cfg.StartTimeout)
-	default:
-		return fail("start %s: %v", name, err)
+	died := make(chan string, 1)
+	go o.watchPod(wait, name, died)
+	up := make(chan error, 1)
+	go func() { up <- o.reg.WaitRunning(wait, name) }()
+	select {
+	case why := <-died:
+		cancel()
+		return fail("start %s: its pod ended before the agent answered: %s", name, why)
+	case err := <-up:
+		switch {
+		case err == nil:
+			return ok("")
+		case errors.Is(err, context.DeadlineExceeded):
+			return fail("start %s: the session did not come up within %s", name, o.cfg.StartTimeout)
+		default:
+			return fail("start %s: %v", name, err)
+		}
+	}
+}
+
+// watchPod sends the reason on died as soon as the session's pod has ended,
+// and returns when ctx ends.
+func (o *Operator) watchPod(ctx context.Context, name string, died chan<- string) {
+	every := o.cfg.PollEvery
+	if every == 0 {
+		every = time.Second
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		alive, err := o.jobs.Alive(ctx, name)
+		if err != nil || alive {
+			continue
+		}
+		why, err := o.jobs.Failure(ctx, name)
+		if err != nil || why == "" {
+			why = "the cluster says nothing of it"
+		}
+		died <- why
+		return
 	}
 }
 

@@ -56,7 +56,7 @@ hs_token_file = "/run/secrets/hs"
 
 [kube]
 run_as_user = 1000
-secrets = [{ name = "dolt", key = "credentials", mount_path = "/home/city/.config/beads/credentials" }]
+secrets = [{ name = "dolt", key = "credentials", mount_path = "/run/roomcity/secrets/dolt/credentials" }]
 `, 1)))
 	require.NoError(t, err)
 	require.Equal(t, 90*time.Second, c.Server.StartTimeout.Duration())
@@ -179,4 +179,16 @@ func TestLoadReadsAFile(t *testing.T) {
 	require.Equal(t, "/city", c.Server.CityDir)
 	_, err = config.Load(filepath.Join(t.TempDir(), "absent.toml"))
 	require.Error(t, err)
+}
+
+func TestASecretMountedInsideTheHomeIsRefusedAndOneOutsideMayNameItsPathVariable(t *testing.T) {
+	_, err := config.Parse([]byte(minimal + "secrets = [{ name = \"dolt\", key = \"credentials\", mount_path = \"/home/city/.config/beads/credentials\" }]\n"))
+	require.ErrorContains(t, err, "inside the home")
+
+	c, err := config.Parse([]byte(minimal + "secrets = [{ name = \"dolt\", key = \"credentials\", mount_path = \"/run/roomcity/secrets/dolt/credentials\", path_env = \"BEADS_CREDENTIALS_FILE\" }]\n"))
+	require.NoError(t, err)
+	require.Equal(t, "BEADS_CREDENTIALS_FILE", c.Kube.Secrets[0].PathEnv)
+
+	_, err = config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.guest]\nsecrets = [{ name = \"kimi\", key = \"k\", mount_path = \"/home/city/.kimi/key\" }]\n\n[kube]", 1)))
+	require.ErrorContains(t, err, "agents.guest.secrets[0]")
 }

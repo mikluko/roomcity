@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -51,6 +52,10 @@ type Secret struct {
 	// in. The Job carries EnvSecretPrefix+Env with the file's path, and the
 	// host reads the file. It needs Key: a variable has one value.
 	Env string `toml:"env"`
+	// PathEnv, when set, names a variable the pod's environment holds the
+	// path of the mounted file in, for a program that takes its file from
+	// one (bd's BEADS_CREDENTIALS_FILE). It needs Key.
+	PathEnv string `toml:"path_env"`
 }
 
 var envName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
@@ -64,6 +69,35 @@ func (s Secret) Validate() error {
 		return fmt.Errorf("env %q needs a key", s.Env)
 	case s.Env != "" && !envName.MatchString(s.Env):
 		return fmt.Errorf("env %q is not a variable name of capitals, digits and underscores", s.Env)
+	case s.PathEnv != "" && s.Key == "":
+		return fmt.Errorf("path_env %q needs a key", s.PathEnv)
+	case s.PathEnv != "" && !envName.MatchString(s.PathEnv):
+		return fmt.Errorf("path_env %q is not a variable name of capitals, digits and underscores", s.PathEnv)
+	}
+	return nil
+}
+
+// DefaultHome is the home of the user of the image.
+const DefaultHome = "/home/city"
+
+func (c Config) home() string {
+	if c.Home != "" {
+		return c.Home
+	}
+	return DefaultHome
+}
+
+// CheckMount refuses a Secret mounted inside the session's home. The
+// kubelet makes the directories above a file it mounts, as root and not
+// writable by the user, so a Secret at ~/.config/beads/credentials makes
+// ~/.config the user's no more: an agent that makes its own directory there
+// fails. Mount the Secret outside the home, and point the program at it with
+// path_env.
+func (c Config) CheckMount(s Secret) error {
+	home := path.Clean(c.home())
+	mount := path.Clean(s.MountPath)
+	if mount == home || strings.HasPrefix(mount, home+"/") {
+		return fmt.Errorf("%s is inside the home %s, where the mount would make its parent directories root's: mount it elsewhere and name path_env", s.MountPath, home)
 	}
 	return nil
 }
@@ -81,6 +115,8 @@ type Config struct {
 	Namespace string `toml:"namespace"`
 	// Image runs the session host: the image of the server itself.
 	Image string `toml:"image"`
+	// Home is the home directory of the user of the image; "" is /home/city.
+	Home string `toml:"home"`
 	// RunAsUser is the user the pod runs as; 0 is 1000, the image's own.
 	RunAsUser int64 `toml:"run_as_user"`
 	// Secrets are mounted in every session's pod; an agent's own are in
@@ -112,10 +148,10 @@ func (c Config) Validate() error {
 // defaultUser is the user of the image.
 const defaultUser = 1000
 
-// path puts the stand-in gc's directory ahead of the image's PATH, which
+// podPath puts the stand-in gc's directory ahead of the image's PATH, which
 // has none of its own: the agent and the hooks call gc by name and must find
 // the stand-in, not the real gc.
-const path = "/usr/local/lib/roomcity/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+const podPath = "/usr/local/lib/roomcity/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 // Jobs implements operate.Jobs on a Kubernetes cluster.
 type Jobs struct {
@@ -181,7 +217,7 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 			env = append(env, corev1.EnvVar{Name: k, Value: spec.Env[k]})
 		}
 	}
-	env = append(env, corev1.EnvVar{Name: "PATH", Value: path})
+	env = append(env, corev1.EnvVar{Name: "PATH", Value: podPath})
 
 	mounts := []corev1.VolumeMount{{Name: "work", MountPath: spec.WorkDir}}
 	volumes := []corev1.Volume{{Name: "work", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
@@ -197,6 +233,9 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 		mounts = append(mounts, m)
 		if s.Env != "" {
 			env = append(env, corev1.EnvVar{Name: EnvSecretPrefix + s.Env, Value: s.MountPath})
+		}
+		if s.PathEnv != "" {
+			env = append(env, corev1.EnvVar{Name: s.PathEnv, Value: s.MountPath})
 		}
 	}
 
@@ -368,6 +407,45 @@ func (j *Jobs) DeleteObject(ctx context.Context, session, id string) (bool, erro
 		return false, err
 	}
 	return true, nil
+}
+
+// failureLogLines is how much of the end of a pod's log Failure reports.
+const failureLogLines = 15
+
+// Failure says why the session's pod ended: its state as the cluster reports
+// it, and the last lines of its log.
+func (j *Jobs) Failure(ctx context.Context, session string) (string, error) {
+	pods, err := j.client.CoreV1().Pods(j.cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labelSession + "=" + id(session)})
+	if err != nil {
+		return "", err
+	}
+	if len(pods.Items) == 0 {
+		return "no pod was made for it", nil
+	}
+	pod := pods.Items[len(pods.Items)-1]
+	var why []string
+	if pod.Status.Reason != "" || pod.Status.Message != "" {
+		why = append(why, strings.TrimSpace(pod.Status.Reason+" "+pod.Status.Message))
+	}
+	for _, c := range pod.Status.ContainerStatuses {
+		switch {
+		case c.State.Terminated != nil:
+			t := c.State.Terminated
+			why = append(why, fmt.Sprintf("%s exited %d %s %s", c.Name, t.ExitCode, t.Reason, t.Message))
+		case c.State.Waiting != nil:
+			why = append(why, fmt.Sprintf("%s waits: %s %s", c.Name, c.State.Waiting.Reason, c.State.Waiting.Message))
+		}
+	}
+	out := strings.TrimSpace(strings.Join(why, "; "))
+	if out == "" {
+		out = "pod " + pod.Name + " is " + string(pod.Status.Phase)
+	}
+	tail := int64(failureLogLines)
+	log, err := j.client.CoreV1().Pods(j.cfg.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{TailLines: &tail}).DoRaw(ctx)
+	if err == nil && len(strings.TrimSpace(string(log))) > 0 {
+		out += "\nits log ends:\n" + strings.TrimRight(string(log), "\n")
+	}
+	return out, nil
 }
 
 func finished(job *batchv1.Job) bool {

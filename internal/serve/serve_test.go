@@ -56,6 +56,8 @@ func (j *jobs) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+func (j *jobs) Failure(context.Context, string) (string, error) { return "", nil }
+
 func (j *jobs) Alive(_ context.Context, name string) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

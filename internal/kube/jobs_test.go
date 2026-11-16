@@ -2,6 +2,7 @@ package kube_test
 
 import (
 	"context"
+	"path"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func newJobs() (*kube.Jobs, *fake.Clientset) {
 		Image:     "sarak.sh/mikluko/roomcity:0.2.0",
 		RunAsUser: 1000,
 		Secrets: []kube.Secret{
-			{Name: "dolt", Key: "credentials", MountPath: "/home/city/.config/beads/credentials"},
+			{Name: "dolt", Key: "credentials", MountPath: "/run/roomcity/secrets/dolt/credentials", PathEnv: "BEADS_CREDENTIALS_FILE"},
 		},
 		NodeSelector:  map[string]string{"kubernetes.io/hostname": "bulgakov"},
 		Tolerations:   []kube.Toleration{{Key: "sarak.sh/workstation", Operator: "Exists", Effect: "NoSchedule"}},
@@ -88,7 +89,7 @@ func TestThePodGetsOnlyItsAgentsSecrets(t *testing.T) {
 		mounts := mountPaths(podOf(t, jobs, c, operate.JobSpec{Session: agent + "-1", Agent: agent, WorkDir: "/w"}))
 		require.Contains(t, mounts, want, agent)
 		require.Len(t, mounts, 3, "the work directory, bd's credentials and the agent's own: %v", agent)
-		creds := mounts["/home/city/.config/beads/credentials"]
+		creds := mounts["/run/roomcity/secrets/dolt/credentials"]
 		require.Equal(t, "credentials", creds.SubPath)
 		require.True(t, creds.ReadOnly)
 	}
@@ -254,4 +255,66 @@ func TestInfoListAndDeleteObjectDescribeAndDeleteTheExactJob(t *testing.T) {
 	deleted, err = jobs.DeleteObject(ctx, "a-1", "uid-a-1")
 	require.NoError(t, err)
 	require.False(t, deleted, "gone")
+}
+
+func TestNoMountMakesAParentOfTheDirectoriesTheAgentWritesInTheHome(t *testing.T) {
+	jobs, c := newJobs()
+	pod := podOf(t, jobs, c, operate.JobSpec{Session: "w-1", Agent: "worker", WorkDir: "/home/city/city/.gc/agents/worker"})
+	home := "/home/city"
+	for _, dir := range []string{".config", ".claude", ".local", ".cache", ".config/goose", ".config/beads"} {
+		for p := range mountPaths(pod) {
+			require.False(t, p == path.Join(home, dir) || strings.HasPrefix(p, path.Join(home, dir)+"/"),
+				"%s is mounted inside ~/%s: the kubelet would make its parents root's", p, dir)
+		}
+	}
+
+	// bd's credentials are a file outside the home, and bd is told where.
+	require.Contains(t, pod.Containers[0].Env, corev1.EnvVar{Name: "BEADS_CREDENTIALS_FILE", Value: "/run/roomcity/secrets/dolt/credentials"})
+	require.Contains(t, mountPaths(pod), "/run/roomcity/secrets/dolt/credentials")
+}
+
+func TestASecretInsideTheHomeIsRefused(t *testing.T) {
+	cfg := kube.Config{}
+	require.ErrorContains(t, cfg.CheckMount(kube.Secret{Name: "d", Key: "k", MountPath: "/home/city/.config/beads/credentials"}), "inside the home")
+	require.ErrorContains(t, cfg.CheckMount(kube.Secret{Name: "d", Key: "k", MountPath: "/home/city"}), "inside the home")
+	require.NoError(t, cfg.CheckMount(kube.Secret{Name: "d", Key: "k", MountPath: "/home/citybank/x"}))
+	require.NoError(t, cfg.CheckMount(kube.Secret{Name: "d", Key: "k", MountPath: "/run/roomcity/secrets/d/k"}))
+	require.ErrorContains(t, kube.Config{Home: "/root"}.CheckMount(kube.Secret{Name: "d", Key: "k", MountPath: "/root/.ssh/id"}), "inside the home")
+	require.ErrorContains(t, kube.Secret{Name: "d", MountPath: "/x", PathEnv: "BEADS_CREDENTIALS_FILE"}.Validate(), "needs a key")
+	require.ErrorContains(t, kube.Secret{Name: "d", Key: "k", MountPath: "/x", PathEnv: "beads"}.Validate(), "variable name")
+}
+
+func TestAFailedPodIsDescribedByItsStateAndTheEndOfItsLog(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", Agent: "worker", WorkDir: "/w"}))
+
+	why, err := jobs.Failure(ctx, "w-1")
+	require.NoError(t, err)
+	require.Equal(t, "no pod was made for it", why)
+
+	_, err = c.CoreV1().Pods("sandbox").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "roomcity-w-1-abc", Namespace: "sandbox", Labels: map[string]string{"roomcity.sarak.sh/session-id": jobID(t, c)}},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "host",
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}},
+			}},
+		},
+	}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	why, err = jobs.Failure(ctx, "w-1")
+	require.NoError(t, err)
+	require.Contains(t, why, "host exited 1 Error")
+	require.Contains(t, why, "its log ends:", "the fake cluster's log is 'fake logs'")
+}
+
+func jobID(t *testing.T, c *fake.Clientset) string {
+	t.Helper()
+	list, err := c.BatchV1().Jobs("sandbox").List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	return list.Items[0].Labels["roomcity.sarak.sh/session-id"]
 }

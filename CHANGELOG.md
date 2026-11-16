@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The runtime's handshake declares `observe.v1` as well, with its operations `observe`, `inventory` and `kill-object`, and `fresh_only` starts (exit 73 for a name any box holds, live or dead). A session's box is its Job, named by the Job's UID and creation time, and `kill-object` deletes by that UID; a service run by the server is a box with its pid. The server answers an agent `dead` only where it can tell: for a service, from the process table; for an agent in a pod, when gc asks about no process the staged command runs. `peek` answers exit 66 for a name no box holds. gc's own `runtime check` passes 21 of 21 and `runtime conformance` 40 of 40 required requirements, and calls the runtime v2-ready.
+- A Secret that has a `key` may name `path_env`: a variable the pod's environment holds the path of the mounted file in (bd's `BEADS_CREDENTIALS_FILE`). A Secret mounted inside the home of the image's user (`/home/city`, or `[kube] home`) is refused when `roomcity.toml` is read: the kubelet makes the directories above a mounted file root's, and the agent can then make none of its own beside it (`~/.config`, `~/.claude`).
 
 ### Changed
 
 - The records of the owner's prompts that waited are closed with a `Dropped` record also when a session is started afresh or ends, not only at `!stop`.
+- A start fails as soon as the session's pod has ended, with the pod's state and the end of its log in the answer gc sees, and not after the 100 seconds it waited. The server's service account needs `get` on `pods/log` for the log.
 
 ### Fixed
 

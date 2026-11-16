@@ -53,6 +53,7 @@ func recording(t *testing.T) []session.HostFrame {
 // fakeJobs is the Kubernetes side: a Job's pod runs whatever onCreate does.
 type fakeJobs struct {
 	mu       sync.Mutex
+	failure  string
 	alive    map[string]bool
 	ids      map[string]string
 	n        int
@@ -85,6 +86,12 @@ func (j *fakeJobs) Delete(_ context.Context, name string) error {
 	delete(j.alive, name)
 	j.deleted = append(j.deleted, name)
 	return nil
+}
+
+func (j *fakeJobs) Failure(context.Context, string) (string, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.failure, nil
 }
 
 func (j *fakeJobs) Alive(_ context.Context, name string) (bool, error) {
@@ -787,4 +794,26 @@ func TestAServiceProcessIsABoxWithAPidAndItsAgentIsReadFromTheProcessTable(t *te
 
 	require.Zero(t, f.do("stop", "", "svc-1").ExitCode)
 	require.Equal(t, "absent", observe(t, f, "svc-1").State)
+}
+
+func TestAStartFailsAsSoonAsItsPodEndsWithTheReasonAndTheEndOfItsLog(t *testing.T) {
+	f := newFixture(t, operate.Config{StartTimeout: 30 * time.Second, PollEvery: 10 * time.Millisecond})
+	f.jobs.failure = "host exited 1 Error\nits log ends:\nFailed to create config directory: Permission denied"
+	f.jobs.onCreate = func(spec operate.JobSpec) {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			f.jobs.mu.Lock()
+			f.jobs.alive[spec.Session] = false
+			f.jobs.mu.Unlock()
+		}()
+	}
+
+	started := time.Now()
+	r := f.do("start", f.startConfig(map[string]any{"nudge": ""}), "w-1")
+	require.Less(t, time.Since(started), 5*time.Second, "it did not wait out its 30 s")
+	require.Equal(t, int32(1), r.ExitCode)
+	require.Contains(t, string(r.Stderr), "its pod ended before the agent answered")
+	require.Contains(t, string(r.Stderr), "Permission denied")
+	require.Contains(t, f.jobs.deleted, "w-1", "the Job is deleted, as for any start that fails")
+	require.Equal(t, "false", string(f.do("is-running", "", "w-1").Stdout))
 }
