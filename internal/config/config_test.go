@@ -89,6 +89,19 @@ memory_request = "512Mi"
 	require.ErrorContains(t, err, "agents.guest.secrets[0]")
 }
 
+func TestASecretNamesItsVariableOnlyWithAKey(t *testing.T) {
+	with := func(secret string) error {
+		_, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.guest]\nsecrets = [{ "+secret+" }]\n\n[kube]", 1)))
+		return err
+	}
+	require.NoError(t, with(`name = "kimi", key = "api-key", mount_path = "/k", env = "KIMI_CODE_TOKEN"`))
+	require.ErrorContains(t, with(`name = "kimi", mount_path = "/k", env = "KIMI_CODE_TOKEN"`), "needs a key")
+	require.ErrorContains(t, with(`name = "kimi", key = "api-key", mount_path = "/k", env = "kimi-token"`), "variable name")
+
+	_, err := config.Parse([]byte(minimal + "secrets = [{ name = \"claude\", key = \"token\", mount_path = \"/c\", env = \"x\" }]\n"))
+	require.ErrorContains(t, err, "kube.secrets[0]")
+}
+
 func TestAnUnknownKeyIsAnError(t *testing.T) {
 	_, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", "listn = \":1\"\n\n[kube]", 1)))
 	require.ErrorContains(t, err, "listn")

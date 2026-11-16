@@ -168,14 +168,14 @@ func (c *Config) validate() error {
 		return err
 	}
 	for i, sec := range c.Kube.Secrets {
-		if sec.Name == "" || sec.MountPath == "" {
-			return fmt.Errorf("kube.secrets[%d] needs a name and a mount_path", i)
+		if err := sec.Validate(); err != nil {
+			return fmt.Errorf("kube.secrets[%d]: %w", i, err)
 		}
 	}
 	for agent, a := range c.Agents {
 		for i, sec := range a.Secrets {
-			if sec.Name == "" || sec.MountPath == "" {
-				return fmt.Errorf("agents.%s.secrets[%d] needs a name and a mount_path", agent, i)
+			if err := sec.Validate(); err != nil {
+				return fmt.Errorf("agents.%s.secrets[%d]: %w", agent, i, err)
 			}
 		}
 	}

@@ -32,8 +32,13 @@ const (
 	containerName  = "host"
 )
 
+// EnvSecretPrefix starts the name of a variable that tells the session host
+// which environment variable of the agent a mounted file is the value of:
+// ROOMCITY_SECRET_<VARIABLE> holds the path of the file.
+const EnvSecretPrefix = "ROOMCITY_SECRET_"
+
 // Secret is a Secret of the namespace mounted in each session's pod. A
-// credential is a file in the pod and never a variable of its environment.
+// credential is a file in the pod and never a variable of the pod's spec.
 type Secret struct {
 	// Name is the Secret.
 	Name string `toml:"name"`
@@ -41,6 +46,25 @@ type Secret struct {
 	// the Secret's keys are the files of the directory MountPath.
 	Key       string `toml:"key"`
 	MountPath string `toml:"mount_path"`
+	// Env, when set, names the variable the agent gets the file's content
+	// in. The Job carries EnvSecretPrefix+Env with the file's path, and the
+	// host reads the file. It needs Key: a variable has one value.
+	Env string `toml:"env"`
+}
+
+var envName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+// Validate reports the first thing wrong with the Secret.
+func (s Secret) Validate() error {
+	switch {
+	case s.Name == "" || s.MountPath == "":
+		return fmt.Errorf("a name and a mount_path are required")
+	case s.Env != "" && s.Key == "":
+		return fmt.Errorf("env %q needs a key", s.Env)
+	case s.Env != "" && !envName.MatchString(s.Env):
+		return fmt.Errorf("env %q is not a variable name of capitals, digits and underscores", s.Env)
+	}
+	return nil
 }
 
 // Toleration lets a pod onto the nodes with a matching taint.
@@ -170,6 +194,9 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 		}
 		volumes = append(volumes, corev1.Volume{Name: vol, VolumeSource: corev1.VolumeSource{Secret: src}})
 		mounts = append(mounts, m)
+		if s.Env != "" {
+			env = append(env, corev1.EnvVar{Name: EnvSecretPrefix + s.Env, Value: s.MountPath})
+		}
 	}
 
 	labels := map[string]string{labelManagedBy: managedBy, labelSession: id(spec.Session)}

@@ -97,6 +97,19 @@ func TestThePodGetsOnlyItsAgentsSecrets(t *testing.T) {
 	require.Len(t, mounts, 2, "an agent that names none gets bd's credentials alone")
 }
 
+func TestASecretThatNamesAVariableIsHandedToTheHostAsAPath(t *testing.T) {
+	c := fake.NewSimpleClientset()
+	jobs := kube.New(c, kube.Config{Namespace: "sandbox", Image: "i"}, map[string][]kube.Secret{
+		"worker": {{Name: "claude", Key: "token", MountPath: "/run/roomcity/secrets/claude/token", Env: "CLAUDE_CODE_OAUTH_TOKEN"}},
+	})
+	pod := podOf(t, jobs, c, operate.JobSpec{Session: "w-1", Agent: "worker", WorkDir: "/w"})
+
+	require.Contains(t, pod.Containers[0].Env, corev1.EnvVar{Name: "ROOMCITY_SECRET_CLAUDE_CODE_OAUTH_TOKEN", Value: "/run/roomcity/secrets/claude/token"})
+	for _, e := range pod.Containers[0].Env {
+		require.NotEqual(t, "CLAUDE_CODE_OAUTH_TOKEN", e.Name, "the value is never in the spec")
+	}
+}
+
 func TestThePodGoesToTheSessionsNodes(t *testing.T) {
 	jobs, c := newJobs()
 	pod := podOf(t, jobs, c, operate.JobSpec{Session: "w-1", Agent: "worker", WorkDir: "/w"})
