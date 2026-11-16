@@ -163,7 +163,7 @@ func line(e session.Entry) rawLine {
 	case session.Prompt:
 		l.Seq, l.Type, l.Text, l.Of = ev.Seq, "prompt", ev.Text, ev.Of
 		l.Source = map[session.Source]string{session.FromOwner: "owner", session.FromGC: "gc"}[ev.Source]
-		l.State = map[session.PromptState]string{session.Stored: "stored", session.Waiting: "waiting", session.Delivered: "delivered"}[ev.State]
+		l.State = map[session.PromptState]string{session.Stored: "stored", session.Waiting: "waiting", session.Delivered: "delivered", session.Dropped: "dropped"}[ev.State]
 	case session.Lifecycle:
 		l.Seq, l.Type = ev.Seq, "lifecycle"
 		l.Kind = map[session.LifecycleKind]string{session.Started: "started", session.StartedAfresh: "started_afresh", session.Stopped: "stopped"}[ev.Kind]

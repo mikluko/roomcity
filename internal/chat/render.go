@@ -251,7 +251,7 @@ func (r *renderer) prompt(p session.Prompt) {
 			note.waiting = r.out.react(note.message, waitingKey)
 		}
 		r.prompts[p.Of] = note
-	case session.Delivered:
+	case session.Delivered, session.Dropped:
 		note, ok := r.prompts[p.Of]
 		if !ok {
 			return
@@ -291,21 +291,11 @@ func (r *renderer) endTurn() {
 }
 
 // stopped takes the stop that the room itself asked for as the end of the
-// waiting: nothing is typed any longer, and the owner's prompts that waited
-// were dropped with the turn, so their marks go. gc's nudges are kept and
-// delivered after the stop, so theirs stay.
+// waiting: nothing is typed any longer. The marks of the prompts the stop
+// dropped go when the server closes each with a Dropped record, and those of
+// gc's nudges, which are kept, when they are Delivered.
 func (r *renderer) stopped() {
 	r.setWorking(false)
-	for seq, note := range r.prompts {
-		if note.source == session.FromGC {
-			continue
-		}
-		if note.waiting != "" {
-			r.out.unreact(note.waiting)
-		}
-		delete(r.prompts, seq)
-		r.out.forgetPrompt(seq)
-	}
 }
 
 // tick does what is due with time: the plan's edit and the typing notice's

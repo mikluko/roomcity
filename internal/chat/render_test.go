@@ -338,8 +338,23 @@ func TestRendererLetsTheStopTheRoomAskedForEndTheWaiting(t *testing.T) {
 
 	r.stopped()
 	require.False(t, out.typings[len(out.typings)-1], "no turn runs, so nothing is typed")
-	require.Equal(t, []ReactionID{"r1"}, out.undone, "the mark of a prompt that was dropped goes")
+	require.Empty(t, out.undone, "the room does not reckon what was dropped: the server says")
+
+	r.event(session.Prompt{Seq: 7, Source: session.FromOwner, State: session.Dropped, Of: 5})
+	require.Equal(t, []ReactionID{"r1"}, out.undone, "the mark of a prompt that was dropped goes with its closing record")
 	require.Equal(t, []uint64{5}, out.forgotten)
+}
+
+func TestRendererTakesNoMarkOffAPromptTheStopDidNotDrop(t *testing.T) {
+	r, out, _ := newTestRenderer()
+	out.prompts[5] = "owner-message"
+	r.event(session.Prompt{Seq: 5, Source: session.FromOwner, State: session.Stored})
+	r.event(session.Prompt{Seq: 6, State: session.Waiting, Of: 5})
+
+	r.stopped() // gc's interrupt, or a stop that drops nothing, has no Dropped record
+	require.Empty(t, out.undone, "a mark stays until the prompt is delivered or dropped")
+	r.event(session.Prompt{Seq: 7, State: session.Delivered, Of: 5})
+	require.Equal(t, []ReactionID{"r1"}, out.undone)
 }
 
 func TestRendererKeepsTheMarkOfGcsNudgeWhenTheOwnerStops(t *testing.T) {
