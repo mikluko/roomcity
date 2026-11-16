@@ -10,6 +10,7 @@ tool (
 require (
 	connectrpc.com/connect v1.21.1
 	github.com/afrase/acp-go v0.2.0
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12

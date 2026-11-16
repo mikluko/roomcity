@@ -155,11 +155,44 @@ func (r *Registry) AnswerPermission(ctx context.Context, name, requestID, option
 	})
 }
 
-// Stop queues the instruction that ends the agent and the host.
-func (r *Registry) Stop(ctx context.Context, name string) error {
-	return r.queueControl(ctx, func(tx *sql.Tx) error {
-		return r.enqueue(tx, name, Instruction{Kind: InstructionStop}, 0)
+// Stop queues the instruction that ends the agent and the host and returns
+// its number, which WaitSent takes.
+func (r *Registry) Stop(ctx context.Context, name string) (uint64, error) {
+	var seq uint64
+	err := r.queueControl(ctx, func(tx *sql.Tx) error {
+		if err := r.enqueue(tx, name, Instruction{Kind: InstructionStop}, 0); err != nil {
+			return err
+		}
+		return tx.QueryRow(`SELECT inst_seq FROM sessions WHERE name = ?`, name).Scan(&seq)
 	})
+	return seq, err
+}
+
+// WaitSent returns once instruction seq of the session has been handed to
+// its host, or the session has ended.
+func (r *Registry) WaitSent(ctx context.Context, name string, seq uint64) error {
+	wake, stop := r.wait()
+	defer stop()
+	for {
+		var sent, state int
+		err := r.db.QueryRowContext(ctx, `
+			SELECT COALESCE((SELECT sent FROM instructions WHERE session = s.name AND seq = ?), 1), s.state
+			FROM sessions s WHERE s.name = ?`, seq, name).Scan(&sent, &state)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if sent == 1 || State(state) == Ended {
+			return nil
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (r *Registry) queueControl(ctx context.Context, f func(*sql.Tx) error) error {
@@ -173,7 +206,9 @@ func (r *Registry) queueControl(ctx context.Context, f func(*sql.Tx) error) erro
 // Instructions streams the session's instructions with a number greater
 // than after, then those queued later. A prompt is recorded as Delivered
 // when it is handed to the receiver for the first time. The channel is
-// closed when ctx ends.
+// closed when ctx ends, and when the session ends or is started afresh,
+// once what was queued before is sent: a host of an earlier start is not
+// handed the next one's instructions.
 func (r *Registry) Instructions(ctx context.Context, name string, after uint64) (<-chan Instruction, error) {
 	if err := r.exists(ctx, name); err != nil {
 		return nil, err
@@ -181,6 +216,10 @@ func (r *Registry) Instructions(ctx context.Context, name string, after uint64) 
 	// What the host has carried out it has been handed, so Cancel no longer
 	// drops it.
 	if _, err := r.db.ExecContext(ctx, `UPDATE instructions SET sent = 1 WHERE session = ? AND seq <= ?`, name, after); err != nil {
+		return nil, err
+	}
+	var epoch int64
+	if err := r.db.QueryRowContext(ctx, `SELECT epoch FROM sessions WHERE name = ?`, name).Scan(&epoch); err != nil {
 		return nil, err
 	}
 	wake, stop := r.wait()
@@ -204,6 +243,9 @@ func (r *Registry) Instructions(ctx context.Context, name string, after uint64) 
 				if err := r.markSent(ctx, name, p); err != nil {
 					return
 				}
+			}
+			if !r.sameStart(ctx, name, epoch) {
+				return
 			}
 			select {
 			case <-wake:
@@ -364,4 +406,53 @@ func (r *Registry) Bundle(ctx context.Context, name string) (manifest, archive [
 		return nil, nil, ErrNotFound
 	}
 	return manifest, archive, err
+}
+
+func (r *Registry) sameStart(ctx context.Context, name string, epoch int64) bool {
+	var now int64
+	var state State
+	err := r.db.QueryRowContext(ctx, `SELECT epoch, state FROM sessions WHERE name = ?`, name).Scan(&now, &state)
+	return err == nil && now == epoch && state != Ended
+}
+
+// SetMark sets the session's mark key.
+func (r *Registry) SetMark(ctx context.Context, name, key, value string) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO marks (session, key, value) VALUES (?, ?, ?)
+		ON CONFLICT (session, key) DO UPDATE SET value = excluded.value`, name, key, value)
+	return err
+}
+
+// Mark returns the session's mark key, "" when it is not set, as it is for a
+// session the registry does not hold.
+func (r *Registry) Mark(ctx context.Context, name, key string) (string, error) {
+	var v string
+	err := r.db.QueryRowContext(ctx, `SELECT value FROM marks WHERE session = ? AND key = ?`, name, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+// RemoveMark removes the session's mark key; one that is not set is no
+// error.
+func (r *Registry) RemoveMark(ctx context.Context, name, key string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM marks WHERE session = ? AND key = ?`, name, key)
+	return err
+}
+
+// ClearMarks removes every mark of the session.
+func (r *Registry) ClearMarks(ctx context.Context, name string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM marks WHERE session = ?`, name)
+	return err
+}
+
+// Get returns the session's Info.
+func (r *Registry) Get(ctx context.Context, name string) (Info, error) {
+	i := Info{Name: name}
+	err := r.db.QueryRowContext(ctx, `SELECT agent, kind, state FROM sessions WHERE name = ?`, name).Scan(&i.Agent, &i.Kind, &i.State)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Info{}, ErrNotFound
+	}
+	return i, err
 }

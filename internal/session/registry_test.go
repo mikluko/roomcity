@@ -347,3 +347,78 @@ func TestReportWithNoFramesReturnsTheStoredNumber(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), last)
 }
+
+func TestAttachStreamEndsWhenTheSessionIsStartedAfreshOrEnded(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	old, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "for the new host")
+	require.NoError(t, err)
+	select {
+	case in, ok := <-old:
+		require.False(t, ok, "the earlier host was handed %+v", in)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the earlier host's stream stayed open")
+	}
+
+	current, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, "for the new host", recv(t, current).Text)
+	require.NoError(t, r.End(ctx, "s"))
+	select {
+	case _, ok := <-current:
+		require.False(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream of an ended session stayed open")
+	}
+}
+
+func TestStopIsSentBeforeTheStreamEnds(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+
+	seq, err := r.Stop(ctx, "s")
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- r.WaitSent(ctx, "s", seq) }()
+	require.Equal(t, session.InstructionStop, recv(t, in).Kind)
+	require.NoError(t, <-done)
+}
+
+func TestMarksAreKeptPerSessionAndEmptyWhenUnset(t *testing.T) {
+	ctx := ctxT(t)
+	path := filepath.Join(t.TempDir(), "r.db")
+	r := open(t, path)
+
+	v, err := r.Mark(ctx, "nobody", "k")
+	require.NoError(t, err)
+	require.Empty(t, v)
+
+	require.NoError(t, r.SetMark(ctx, "s", "GC_DRAIN", "1"))
+	require.NoError(t, r.SetMark(ctx, "s", "GC_DRAIN", "2"))
+	require.NoError(t, r.SetMark(ctx, "s", "other", "x"))
+	require.NoError(t, r.Close())
+
+	r = open(t, path)
+	v, err = r.Mark(ctx, "s", "GC_DRAIN")
+	require.NoError(t, err)
+	require.Equal(t, "2", v)
+
+	require.NoError(t, r.RemoveMark(ctx, "s", "GC_DRAIN"))
+	require.NoError(t, r.RemoveMark(ctx, "s", "GC_DRAIN"))
+	v, _ = r.Mark(ctx, "s", "GC_DRAIN")
+	require.Empty(t, v)
+	require.NoError(t, r.ClearMarks(ctx, "s"))
+	v, _ = r.Mark(ctx, "s", "other")
+	require.Empty(t, v)
+}

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	host_seq   INTEGER NOT NULL DEFAULT 0,
 	inst_seq   INTEGER NOT NULL DEFAULT 0,
 	new_req    TEXT NOT NULL DEFAULT '',
+	epoch      INTEGER NOT NULL DEFAULT 0,
 	rev       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -42,6 +43,12 @@ CREATE TABLE IF NOT EXISTS events (
 	of        INTEGER NOT NULL DEFAULT 0,
 	lkind     INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session, seq)
+);
+CREATE TABLE IF NOT EXISTS marks (
+	session TEXT NOT NULL,
+	key     TEXT NOT NULL,
+	value   TEXT NOT NULL,
+	PRIMARY KEY (session, key)
 );
 CREATE TABLE IF NOT EXISTS bundles (
 	session  TEXT PRIMARY KEY,
@@ -187,7 +194,7 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 			INSERT INTO sessions (name, agent, kind, state, token_hash, host_seq, rev)
 			VALUES (?, ?, ?, ?, ?, 0, 1)
 			ON CONFLICT (name) DO UPDATE SET agent = excluded.agent, kind = excluded.kind,
-				state = excluded.state, token_hash = excluded.token_hash, host_seq = 0, inst_seq = 0, new_req = '', rev = rev + 1`,
+				state = excluded.state, token_hash = excluded.token_hash, host_seq = 0, inst_seq = 0, new_req = '', epoch = epoch + 1, rev = rev + 1`,
 			name, agent, kind, Starting, hashToken(token)); err != nil {
 			return err
 		}
