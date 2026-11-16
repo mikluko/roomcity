@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-16
+
 ### Added
 
 - The room's `done` tool accepts `blocked`, `commit` and `branch`, validating a commit id of 7 to 40 hexadecimal digits with a non-empty branch and refusing either field on a blocked task; `result` explains `no-op`, `shipped`, `blocked` and `abandoned` and, for an abandoned task, says that the server ended the worker's session before it gave a result and gives the server's reason.
@@ -223,7 +225,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.12.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.13.0...HEAD
+[0.13.0]: https://sarak.sh/mikluko/roomcity/compare/v0.12.0...v0.13.0
 [0.12.0]: https://sarak.sh/mikluko/roomcity/compare/v0.11.0...v0.12.0
 [0.11.0]: https://sarak.sh/mikluko/roomcity/compare/v0.10.0...v0.11.0
 [0.10.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.10.0

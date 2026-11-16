@@ -33,7 +33,7 @@ env = "OPENAI_API_KEY"
 [kube]
 namespace = "roomcity-example"
 # The image of the server itself runs the session's host.
-image = "sarak.sh/mikluko/roomcity:0.12.0"
+image = "sarak.sh/mikluko/roomcity:0.13.0"
 run_as_user = 1000
 cpu_request = "250m"
 memory_request = "512Mi"
