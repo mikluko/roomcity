@@ -205,6 +205,24 @@ image = "roomcity"
 	require.Equal(t, http.StatusNotFound, post(runtimeURL, "/roomcity.v1.HostService/Report"))
 	require.Equal(t, http.StatusNotFound, post("http://"+ls.Page.Addr().String(), "/roomcity.v1.RuntimeService/Operate"))
 
+	// The transcript of the session is a page of the page listener alone.
+	get := func(base, path string) (int, string) {
+		res, err := http.Get(base + path)
+		require.NoError(t, err)
+		defer func() { _ = res.Body.Close() }()
+		var b bytes.Buffer
+		_, _ = b.ReadFrom(res.Body)
+		return res.StatusCode, b.String()
+	}
+	status, body := get("http://"+ls.Page.Addr().String(), "/-/host-1")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, "host-1")
+	require.Contains(t, body, "ended")
+	status, _ = get(netURL, "/-/host-1")
+	require.Equal(t, http.StatusNotFound, status, "the sessions' pods do not reach it")
+	status, _ = get(runtimeURL, "/-/host-1")
+	require.Equal(t, http.StatusNotFound, status)
+
 	stop()
 	require.NoError(t, <-served)
 }

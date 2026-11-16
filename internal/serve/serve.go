@@ -22,6 +22,7 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/operate"
 	"sarak.sh/mikluko/roomcity/internal/server"
 	"sarak.sh/mikluko/roomcity/internal/session"
+	"sarak.sh/mikluko/roomcity/internal/transcripts"
 )
 
 // DatabaseFile is the registry's file in the configuration's data directory.
@@ -72,6 +73,32 @@ type Options struct {
 	Log  *slog.Logger
 }
 
+// purgeEvery is how often the transcripts past their term are removed.
+const purgeEvery = time.Hour
+
+// purgeTranscripts removes the transcripts of sessions that ended more than
+// term ago, now and then, until ctx ends.
+func purgeTranscripts(ctx context.Context, reg *session.Registry, term, every time.Duration, log *slog.Logger) {
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		n, err := reg.Purge(ctx, time.Now().Add(-term))
+		switch {
+		case ctx.Err() != nil:
+			return
+		case err != nil:
+			log.Error("removing the transcripts past their term", "err", err)
+		case n > 0:
+			log.Info("removed the transcripts past their term", "sessions", n)
+		}
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // Run serves until ctx ends or a listener fails, and closes the registry
 // before it returns.
 func Run(ctx context.Context, o Options) error {
@@ -103,7 +130,13 @@ func Run(ctx context.Context, o Options) error {
 		StopGrace:    cfg.Server.StopGrace.Duration(),
 	})))
 
+	s.HandlePage(transcripts.Prefix, (&transcripts.Page{Source: reg, City: cfg.Chat.Name}).Handler())
+
 	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		purgeTranscripts(ctx, reg, cfg.Server.TranscriptTerm.Duration(), purgeEvery, log)
+		return nil
+	})
 	for _, l := range []struct {
 		name string
 		on   net.Listener

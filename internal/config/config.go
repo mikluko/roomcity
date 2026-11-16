@@ -55,6 +55,9 @@ type Server struct {
 	// both as a duration such as "100s".
 	StartTimeout Duration `toml:"start_timeout"`
 	StopGrace    Duration `toml:"stop_grace"`
+	// TranscriptTerm is how long a session's transcript is kept after the
+	// session ends, as a duration such as "2160h"; 0 means 90 days.
+	TranscriptTerm Duration `toml:"transcript_term"`
 }
 
 // Agent is the table [agents.<name>].
@@ -94,9 +97,10 @@ func (d Duration) Duration() time.Duration { return time.Duration(d) }
 
 // Defaults of the keys the file may leave out.
 const (
-	DefaultListen        = ":8080"
-	DefaultRuntimeListen = "127.0.0.1:8082"
-	DefaultPageListen    = "127.0.0.1:8081"
+	DefaultListen         = ":8080"
+	DefaultRuntimeListen  = "127.0.0.1:8082"
+	DefaultPageListen     = "127.0.0.1:8081"
+	DefaultTranscriptTerm = 90 * 24 * time.Hour
 )
 
 // Load reads and validates the file at path.
@@ -141,6 +145,9 @@ func (c *Config) defaults() {
 	if s.PageListen == "" {
 		s.PageListen = DefaultPageListen
 	}
+	if s.TranscriptTerm == 0 {
+		s.TranscriptTerm = Duration(DefaultTranscriptTerm)
+	}
 }
 
 func (c *Config) validate() error {
@@ -156,8 +163,8 @@ func (c *Config) validate() error {
 		return errors.New("server.url is required")
 	case c.Kube.Namespace == "" || c.Kube.Image == "":
 		return errors.New("kube.namespace and kube.image are required")
-	case s.StartTimeout < 0 || s.StopGrace < 0:
-		return errors.New("a timeout is negative")
+	case s.StartTimeout < 0 || s.StopGrace < 0 || s.TranscriptTerm < 0:
+		return errors.New("a timeout or a term is negative")
 	}
 	for key, addr := range map[string]string{"server.runtime_listen": s.RuntimeListen, "server.page_listen": s.PageListen} {
 		if err := loopback(addr); err != nil {

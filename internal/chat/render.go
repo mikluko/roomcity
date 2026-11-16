@@ -54,6 +54,9 @@ type renderer struct {
 	typedAt  time.Time
 	// promptID is the id of the request that began the turn, as JSON.
 	promptID string
+	// toolLimit and detailLimit are how many bytes of a tool call's output
+	// and of a permission request's detail are shown; 0 shows all.
+	toolLimit, detailLimit int
 }
 
 type promptNote struct {
@@ -74,7 +77,18 @@ func newRenderer(out outbox, now func() time.Time, planGap time.Duration) *rende
 		perms:   map[string]*permission{},
 		byMsg:   map[MessageID]*permission{},
 		prompts: map[uint64]promptNote{},
+
+		toolLimit:   maxToolOutput,
+		detailLimit: maxPermissionDetail,
 	}
+}
+
+// drain shows what the stream left unsaid, as a turn's end does, but leaves
+// the open requests as they are: the session may still be running.
+func (r *renderer) drain() {
+	r.endThoughts()
+	r.sendAll(r.answer.flush())
+	r.finishPlan()
 }
 
 // event takes the next event of the session.
@@ -134,7 +148,8 @@ type rpc struct {
 	Result *struct {
 		StopReason string `json:"stopReason"`
 		Outcome    struct {
-			Outcome string `json:"outcome"`
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
 		} `json:"outcome"`
 	} `json:"result"`
 }
@@ -307,13 +322,14 @@ type tool struct {
 	name                string
 	output, diff        string
 	started             MessageID
+	limit               int
 }
 
 func (r *renderer) toolUpdate(u map[string]any) {
 	id, _ := u["toolCallId"].(string)
 	t := r.tools[id]
 	if t == nil {
-		t = &tool{status: "pending"}
+		t = &tool{status: "pending", limit: r.toolLimit}
 		r.tools[id] = t
 	}
 	t.merge(u)
@@ -400,7 +416,7 @@ func (t *tool) result() Message {
 		detail = unfence(t.output)
 	}
 	if detail != "" {
-		m.Fold = &Fold{Summary: "output", Text: cut(detail, maxToolOutput), Code: true}
+		m.Fold = &Fold{Summary: "output", Text: cut(detail, t.limit), Code: true}
 	}
 	return m
 }
@@ -433,10 +449,11 @@ func unfence(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// cut keeps the first n bytes of s, at a rune boundary, marking the cut.
+// cut keeps the first n bytes of s, at a rune boundary, marking the cut; with
+// n of 0 it keeps all.
 func cut(s string, n int) string {
 	s = strings.TrimRight(s, "\n")
-	if len(s) <= n {
+	if n <= 0 || len(s) <= n {
 		return s
 	}
 	for n > 0 && !isRuneStart(s[n]) {
@@ -564,7 +581,7 @@ func (r *renderer) permissionRequest(m rpc) {
 		Kind: Text,
 		Body: fmt.Sprintf("🔐 **Permission needed:** `%s`\n\nReact to answer: %s", title, strings.Join(labels, "   ")),
 	}
-	if d := permissionDetail(m.Params.ToolCall); d != "" {
+	if d := permissionDetail(m.Params.ToolCall, r.detailLimit); d != "" {
 		msg.Fold = &Fold{Summary: "details", Text: d, Code: true}
 	}
 	r.setWorking(false)
@@ -574,6 +591,16 @@ func (r *renderer) permissionRequest(m rpc) {
 	}
 	r.perms[p.requestID] = p
 	r.byMsg[p.message] = p
+}
+
+// optionName returns the name of the option with the id, or the id.
+func (p *permission) optionName(id string) string {
+	for _, o := range p.options {
+		if o.id == id {
+			return o.name
+		}
+	}
+	return id
 }
 
 // freeKey returns key if no option has it yet, and else the first spare key
@@ -588,11 +615,11 @@ func (p *permission) freeKey(key string) string {
 	return key
 }
 
-func permissionDetail(call map[string]any) string {
+func permissionDetail(call map[string]any, limit int) string {
 	items, _ := call["content"].([]any)
 	for _, c := range items {
 		if cm, _ := c.(map[string]any); cm["type"] == "diff" {
-			return cut(diffText(cm), maxPermissionDetail)
+			return cut(diffText(cm), limit)
 		}
 	}
 	if ri, ok := call["rawInput"].(map[string]any); ok {
@@ -608,8 +635,13 @@ func permissionDetail(call map[string]any) string {
 // ends cancelled, without an answer from the room, was withdrawn.
 func (r *renderer) permissionAnswered(m rpc) {
 	p := r.perms[string(m.ID)]
-	if !p.answered && m.Result != nil && m.Result.Outcome.Outcome == "cancelled" {
-		r.send(Message{Kind: Notice, Body: "The permission request was withdrawn.", ReplyTo: p.message})
+	if !p.answered && m.Result != nil {
+		switch {
+		case m.Result.Outcome.Outcome == "cancelled":
+			r.send(Message{Kind: Notice, Body: "The permission request was withdrawn.", ReplyTo: p.message})
+		case m.Result.Outcome.OptionID != "":
+			r.send(Message{Kind: Notice, Body: "Answered: " + p.optionName(m.Result.Outcome.OptionID), ReplyTo: p.message})
+		}
 	}
 	p.answered = true
 	r.setWorking(true)
