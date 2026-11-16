@@ -1,6 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabledManagers": ["gomod", "custom.regex"],
+  "packageRules": [
+    {
+      "description": "connect-go v2 is a new module path, connectrpc.com/connect/v2, and the move to it is work of its own; a bare require of the new major, which nothing imports, is no update",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["connectrpc.com/connect"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
