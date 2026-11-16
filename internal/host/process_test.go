@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -106,11 +107,21 @@ func (a *helperAgent) Prompt(ctx context.Context, req *acp.PromptRequest) (*acp.
 	_ = a.conn.SessionUpdate(ctx, &acp.SessionNotification{SessionID: req.SessionID, Update: acp.SessionUpdate{
 		AgentMessageChunk: &acp.ContentChunk{Content: acp.ContentBlock{Text: &acp.TextContent{Text: text}}},
 	}})
-	if os.Getenv("ROOMCITY_TEST_AGENT") == "exit" {
-		// The answer is written, then the process ends at once.
-		go func() { time.Sleep(time.Millisecond); os.Exit(0) }()
-	}
 	return &acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+// exitAfterAnswer ends the process as soon as the answer to a prompt has been
+// written to w: the agent that goes at once after its last words. The end is
+// tied to the write, not to a time after the handler returned, which a slow
+// machine can let pass before the answer is written.
+type exitAfterAnswer struct{ w io.Writer }
+
+func (e exitAfterAnswer) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err == nil && bytes.Contains(p, []byte(`"stopReason"`)) {
+		os.Exit(0)
+	}
+	return n, err
 }
 
 // TestHelperAgent is the process, not a test: it serves the agent on stdio.
@@ -119,7 +130,11 @@ func TestHelperAgent(t *testing.T) {
 		t.Skip("the agent process of the tests")
 	}
 	a := &helperAgent{}
-	conn := acp.NewClientConn(os.Stdin, os.Stdout, func(c *acp.ClientConn) acp.Agent { a.conn = c; return a })
+	var out io.Writer = os.Stdout
+	if os.Getenv("ROOMCITY_TEST_AGENT") == "exit" {
+		out = exitAfterAnswer{os.Stdout}
+	}
+	conn := acp.NewClientConn(os.Stdin, out, func(c *acp.ClientConn) acp.Agent { a.conn = c; return a })
 	<-conn.Done()
 	os.Exit(0)
 }
@@ -173,7 +188,10 @@ func TestAnAgentThatExitsRightAfterItsAnswerLosesNothing(t *testing.T) {
 		server, url := newFakeServer(t)
 		server.stageWith(&roomcityv1.StageManifest{Command: []string{os.Args[0], "-test.run=TestHelperAgent"}}, nil)
 		done := make(chan error, 1)
+		// Registered after the server's cleanup, so that it runs first: a test
+		// that fails ends the host before the server waits for its stream.
 		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
 		go func() {
 			done <- Run(ctx, Config{Session: "s", Token: testToken, Server: url, WorkDir: t.TempDir(),
 				Claude: claudeacp.Config{CLIPath: "/never"}, Retry: time.Millisecond})
@@ -195,7 +213,6 @@ func TestAnAgentThatExitsRightAfterItsAnswerLosesNothing(t *testing.T) {
 		case <-time.After(15 * time.Second):
 			t.Fatal("the host did not end")
 		}
-		cancel()
 	}
 }
 
