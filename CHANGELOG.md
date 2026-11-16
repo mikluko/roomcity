@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
 ### Added
 
 - The runtime's handshake declares `observe.v1` as well, with its operations `observe`, `inventory` and `kill-object`, and `fresh_only` starts (exit 73 for a name any box holds, live or dead). A session's box is its Job, named by the Job's UID and creation time, and `kill-object` deletes by that UID; a service run by the server is a box with its pid. The server answers an agent `dead` only where it can tell: for a service, from the process table; for an agent in a pod, when gc asks about no process the staged command runs. `peek` answers exit 66 for a name no box holds. gc's own `runtime check` passes 21 of 21 and `runtime conformance` 40 of 40 required requirements, and calls the runtime v2-ready.
@@ -66,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.2.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.0...HEAD
+[0.3.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.0
 [0.2.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.2.0
 [0.1.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.1.0
