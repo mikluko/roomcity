@@ -16,6 +16,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"sarak.sh/mikluko/roomcity/internal/standin"
 )
 
 const (
@@ -63,7 +65,7 @@ var commands = map[string]command{
 	"runtime": notImplemented("runtime"),
 	"server":  notImplemented("server"),
 	"host":    notImplemented("host"),
-	"gc":      notImplemented("gc"),
+	"gc":      runGc,
 }
 
 func main() {
@@ -115,4 +117,14 @@ func notImplemented(name string) command {
 		_, _ = fmt.Fprintf(p.Stderr, "roomcity %s: not implemented\n", name)
 		return exitFailure
 	}
+}
+
+// runGc is the stand-in for gc in a session's pod.
+func runGc(ctx context.Context, args []string, p process) int {
+	cfg, err := standin.ConfigFromEnv(p.Env)
+	if err != nil {
+		_, _ = fmt.Fprintf(p.Stderr, "gc: %v\n", err)
+		return exitFailure
+	}
+	return standin.Run(ctx, cfg, args, standin.Streams{Stdin: p.Stdin, Stdout: p.Stdout, Stderr: p.Stderr, Env: p.Env, Dir: p.Dir})
 }
