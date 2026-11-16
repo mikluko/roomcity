@@ -33,7 +33,10 @@ const (
 	maxToolOutput = 4000
 	// maxPermissionDetail is the part of a diff a permission request shows.
 	maxPermissionDetail = 1500
-	waitingKey          = "⏳"
+	// closedFor is how long a reaction on a permission request that is over
+	// is still told so.
+	closedFor  = time.Hour
+	waitingKey = "⏳"
 )
 
 // renderer turns the events of one session into what the room shows. It is
@@ -49,9 +52,12 @@ type renderer struct {
 	planned  planState
 	perms    map[string]*permission
 	byMsg    map[MessageID]*permission
-	prompts  map[uint64]promptNote
-	working  bool
-	typedAt  time.Time
+	// denied is, by the id of a tool call, why a permission request for it
+	// ended without a yes: "cancelled" or "refused".
+	denied  map[string]string
+	prompts map[uint64]promptNote
+	working bool
+	typedAt time.Time
 	// promptID is the id of the request that began the turn, as JSON.
 	promptID string
 	// toolLimit and detailLimit are how many bytes of a tool call's output
@@ -76,6 +82,7 @@ func newRenderer(out outbox, now func() time.Time, planGap time.Duration) *rende
 		tools:   map[string]*tool{},
 		perms:   map[string]*permission{},
 		byMsg:   map[MessageID]*permission{},
+		denied:  map[string]string{},
 		prompts: map[uint64]promptNote{},
 
 		toolLimit:   maxToolOutput,
@@ -282,11 +289,11 @@ func (r *renderer) endTurn() {
 	for _, p := range r.perms {
 		if !p.answered {
 			p.answered = true
+			r.denied[p.tool] = "cancelled"
 			r.send(Message{Kind: Notice, Body: "The permission request was withdrawn.", ReplyTo: p.message})
 		}
 	}
 	r.perms = map[string]*permission{}
-	r.byMsg = map[MessageID]*permission{}
 	r.setWorking(false)
 }
 
@@ -315,8 +322,11 @@ type tool struct {
 	title, kind, status string
 	name                string
 	output, diff        string
-	started             MessageID
-	limit               int
+	// denial is "cancelled" or "refused" when the call ended without its
+	// permission, and its output is the agent's own account of that.
+	denial  string
+	started MessageID
+	limit   int
 }
 
 func (r *renderer) toolUpdate(u map[string]any) {
@@ -328,6 +338,10 @@ func (r *renderer) toolUpdate(u map[string]any) {
 	}
 	t.merge(u)
 	ended := t.status == "completed" || t.status == "failed"
+	if ended {
+		t.denial = r.denied[id]
+		delete(r.denied, id)
+	}
 	if t.started == "" && (toolKnown(u) || ended) {
 		t.started = r.send(Message{Kind: Notice, Body: "🔧 **" + t.label() + "**"})
 	}
@@ -403,6 +417,9 @@ func (t *tool) result() Message {
 	mark, word := "✅", "done"
 	if t.status == "failed" {
 		mark, word = "❌", "failed"
+	}
+	if t.denial != "" {
+		return Message{Kind: Notice, Body: "❌ " + t.denial, ReplyTo: t.started}
 	}
 	m := Message{Kind: Notice, Body: mark + " " + word, ReplyTo: t.started}
 	detail := t.diff
@@ -535,13 +552,16 @@ func planBody(entries []planEntry) string {
 
 type permission struct {
 	requestID string
+	tool      string // the id of the tool call it is for
 	message   MessageID
+	at        time.Time
+	told      bool                        // a reaction after its end has been answered
 	keys      []string                    // the reactions' keys, in the options' order
 	options   map[string]permissionOption // by the reaction's key
 	answered  bool
 }
 
-type permissionOption struct{ id, name string }
+type permissionOption struct{ id, name, kind string }
 
 // spareKeys are the reactions for options whose kind's key another option
 // has taken.
@@ -563,19 +583,20 @@ func permissionKey(kind string) string {
 
 func (r *renderer) permissionRequest(m rpc) {
 	title, _ := m.Params.ToolCall["title"].(string)
-	p := &permission{requestID: string(m.ID), options: map[string]permissionOption{}}
+	p := &permission{requestID: string(m.ID), options: map[string]permissionOption{}, at: r.now()}
+	p.tool, _ = m.Params.ToolCall["toolCallId"].(string)
 	var labels []string
 	for _, o := range m.Params.Options {
 		key := p.freeKey(permissionKey(o.Kind))
 		p.keys = append(p.keys, key)
-		p.options[key] = permissionOption{id: o.ID, name: o.Name}
+		p.options[key] = permissionOption{id: o.ID, name: o.Name, kind: o.Kind}
 		labels = append(labels, key+" "+o.Name)
 	}
 	msg := Message{
 		Kind: Text,
 		Body: fmt.Sprintf("🔐 **Permission needed:** `%s`\n\nReact to answer: %s", title, strings.Join(labels, "   ")),
 	}
-	if d := permissionDetail(m.Params.ToolCall, r.detailLimit); d != "" {
+	if d := permissionDetail(m.Params.ToolCall, r.detailLimit); d != "" && !strings.Contains(title, d) {
 		msg.Fold = &Fold{Summary: "details", Text: d, Code: true}
 	}
 	r.setWorking(false)
@@ -585,6 +606,16 @@ func (r *renderer) permissionRequest(m rpc) {
 	}
 	r.perms[p.requestID] = p
 	r.byMsg[p.message] = p
+	r.forgetClosed()
+}
+
+// forgetClosed drops the requests that have been over for closedFor.
+func (r *renderer) forgetClosed() {
+	for msg, p := range r.byMsg {
+		if p.answered && r.now().Sub(p.at) > closedFor {
+			delete(r.byMsg, msg)
+		}
+	}
 }
 
 // optionName returns the name of the option with the id, or the id.
@@ -595,6 +626,15 @@ func (p *permission) optionName(id string) string {
 		}
 	}
 	return id
+}
+
+func (p *permission) optionKind(id string) string {
+	for _, o := range p.options {
+		if o.id == id {
+			return o.kind
+		}
+	}
+	return ""
 }
 
 // freeKey returns key if no option has it yet, and else the first spare key
@@ -629,6 +669,13 @@ func permissionDetail(call map[string]any, limit int) string {
 // ends cancelled, without an answer from the room, was withdrawn.
 func (r *renderer) permissionAnswered(m rpc) {
 	p := r.perms[string(m.ID)]
+	switch {
+	case m.Result == nil:
+	case m.Result.Outcome.Outcome == "cancelled":
+		r.denied[p.tool] = "cancelled"
+	case strings.HasPrefix(p.optionKind(m.Result.Outcome.OptionID), "reject"):
+		r.denied[p.tool] = "refused"
+	}
 	if !p.answered && m.Result != nil {
 		switch {
 		case m.Result.Outcome.Outcome == "cancelled":
@@ -646,11 +693,18 @@ func (r *renderer) permissionAnswered(m rpc) {
 // role.
 func (r *renderer) answerPermission(to MessageID, key string, by UserID) {
 	p := r.byMsg[to]
-	if p == nil || p.answered {
+	if p == nil {
 		return
 	}
 	opt, ok := p.options[key]
 	if !ok {
+		return
+	}
+	if p.answered {
+		if !p.told {
+			p.told = true
+			r.send(Message{Kind: Notice, Body: "The permission request is no longer open.", ReplyTo: p.message})
+		}
 		return
 	}
 	p.answered = true

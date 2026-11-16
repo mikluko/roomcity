@@ -226,9 +226,10 @@ func TestRendererTakesTheFirstOwnersReactionAsTheAnswer(t *testing.T) {
 	r.answerPermission("m1", "❌", "@owner:x")
 	r.answerPermission("m1", "✅", "@owner2:x")
 	require.Equal(t, []string{"7 no"}, out.answers)
-	require.Len(t, out.sent, 2)
+	require.Len(t, out.sent, 3)
 	require.Equal(t, "Answered by @owner:x: Reject", out.sent[1].Body)
 	require.Equal(t, MessageID("m1"), out.sent[1].ReplyTo)
+	require.Equal(t, "The permission request is no longer open.", out.sent[2].Body, "the second owner's reaction is told it came late")
 }
 
 func TestRendererWithdrawsAPermissionNobodyAnswered(t *testing.T) {
@@ -239,7 +240,63 @@ func TestRendererWithdrawsAPermissionNobodyAnswered(t *testing.T) {
 	require.Equal(t, MessageID("m1"), out.sent[len(out.sent)-1].ReplyTo)
 
 	r.answerPermission("m1", "✅", "@owner:x")
+	r.answerPermission("m1", "❌", "@owner:x")
 	require.Empty(t, out.answers, "a request that is over takes no answer")
+	require.Equal(t, "The permission request is no longer open.", out.sent[len(out.sent)-1].Body)
+	require.Equal(t, MessageID("m1"), out.sent[len(out.sent)-1].ReplyTo)
+	require.Len(t, out.sent, 3, "and is told so once")
+
+	r.answerPermission("m1", "🚫", "@owner:x")
+	require.Len(t, out.sent, 3, "a key the request never offered gets no word")
+}
+
+func TestRendererForgetsAClosedRequestAfterAWhile(t *testing.T) {
+	r, out, c := newTestRenderer()
+	r.event(permissionRequest("7", "Run it"))
+	r.event(endOfTurn())
+	c.advance(2 * closedFor)
+	r.event(permissionRequest("8", "Run another"))
+
+	n := len(out.sent)
+	r.answerPermission("m1", "✅", "@owner:x")
+	require.Len(t, out.sent, n)
+}
+
+func TestRendererDoesNotShowACommandTwiceInAPermissionRequest(t *testing.T) {
+	r, out, _ := newTestRenderer()
+	r.event(permissionRequest("7", "rm -rf x"))
+	require.Nil(t, out.sent[0].Fold)
+	require.Equal(t, 1, strings.Count(out.sent[0].Body, "rm -rf x"))
+}
+
+func TestRendererSaysACallWasCancelledOrRefusedNotWhatTheAgentSaid(t *testing.T) {
+	const boilerplate = "The user doesn't want to proceed with this tool use. STOP what you are doing."
+	fail := update("tool_call_update", `"toolCallId":"t","status":"failed","content":[{"type":"content","content":{"type":"text","text":"`+boilerplate+`"}}]`)
+
+	r, out, _ := newTestRenderer()
+	r.event(update("tool_call_update", `"toolCallId":"t","title":"Bash","rawInput":{"command":"rm -rf x"}`))
+	r.event(permissionRequest("7", "Run it"))
+	r.event(toAgent(`{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"cancelled"}}}`))
+	r.event(fail)
+	last := out.sent[len(out.sent)-1]
+	require.Equal(t, "❌ cancelled", last.Body)
+	require.Nil(t, last.Fold)
+
+	r, out, _ = newTestRenderer()
+	r.event(update("tool_call_update", `"toolCallId":"t","title":"Bash","rawInput":{"command":"rm -rf x"}`))
+	r.event(permissionRequest("7", "Run it"))
+	r.answerPermission("m2", "❌", "@owner:x")
+	r.event(toAgent(`{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"no"}}}`))
+	r.event(fail)
+	last = out.sent[len(out.sent)-1]
+	require.Equal(t, "❌ refused", last.Body)
+	require.Nil(t, last.Fold)
+
+	r, out, _ = newTestRenderer()
+	r.event(update("tool_call_update", `"toolCallId":"t","title":"Bash","rawInput":{"command":"false"}`))
+	r.event(fail)
+	require.Equal(t, "❌ failed", out.sent[len(out.sent)-1].Body, "a call that failed on its own is failed")
+	require.NotNil(t, out.sent[len(out.sent)-1].Fold)
 }
 
 func TestRendererShowsGcsNudgeAsANoticeAndMarksAWaitingPrompt(t *testing.T) {

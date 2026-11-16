@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A session's pod gets the environment gc set for the agent, and not only the `GC_*` variables of it: a provider's `env` from `city.toml` (goose's `GOOSE_PROVIDER`, `GOOSE_MODEL`, `OPENAI_HOST`...) reaches the pod, so that `guest` no longer fails with "Configuration value not found: GOOSE_PROVIDER". What the pod has of its own is left out: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `PWD`, `OLDPWD`, `TMPDIR`, `HOSTNAME`, `TERM`, the locale (`LANG`, `LANGUAGE`, `LC_*`), `XDG_*` and `KUBERNETES_*`; the server's own `ROOMCITY_*` win; and `GC_DOLT_PASSWORD`, a secret gc sets, is not written into the Job's spec (bd reads its credentials from the file `BEADS_CREDENTIALS_FILE` names). The start logs, by name, what it left out.
 
+### Changed
+
+- A table's plain text, which notifications and plain clients show, keeps its rows and separators instead of its cells run together.
+- A permission request no longer shows its command twice.
+- A tool call that ended because its permission was withdrawn or refused is "❌ cancelled" or "❌ refused", without the agent's own sentence about it.
+- A reaction on a permission request that is over, withdrawn or answered, is told once that the request is no longer open.
+
 ## [0.3.2] - 2026-11-16
 
 ### Fixed

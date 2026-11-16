@@ -262,6 +262,10 @@ func (d *Driver) isOwnUser(user id.UserID) bool {
 // fold, if any, as a details block.
 func render(msg chat.Message) event.MessageEventContent {
 	content := format.RenderMarkdown(msg.Body, true, false)
+	if strings.Contains(content.FormattedBody, "<table>") {
+		// The plain text mautrix makes of a table is its cells run together.
+		content.Body = msg.Body
+	}
 	f := msg.Fold
 	if f == nil {
 		return content
