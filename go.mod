@@ -15,7 +15,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/stretchr/testify v1.12.1
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark v1.8.7
 	go.yaml.in/yaml/v4 v4.0.0
 	golang.org/x/sync v0.25.0
 	google.golang.org/protobuf v1.36.12

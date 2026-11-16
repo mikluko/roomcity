@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated: github.com/yuin/goldmark v1.8.7.
+
 ## [0.12.0] - 2026-11-16
 
 ### Added
