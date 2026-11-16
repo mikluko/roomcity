@@ -113,6 +113,11 @@ type Driver interface {
 	Send(ctx context.Context, room RoomID, speaker string, msg Message) (MessageID, error)
 	// React puts a reaction on a message as the speaker.
 	React(ctx context.Context, room RoomID, speaker string, to MessageID, key string) (ReactionID, error)
+	// SendFile sends a file to a room as the speaker: an image shown in the
+	// timeline where the chat system can, anything else as a file. It
+	// returns ErrFileTooLarge, wrapped, for a file that the chat system will
+	// not take for its size, and Refused for any other refusal.
+	SendFile(ctx context.Context, room RoomID, speaker string, f File) (MessageID, error)
 	// Unreact takes a reaction of the speaker back.
 	Unreact(ctx context.Context, room RoomID, speaker string, reaction ReactionID) error
 	// Typing turns the speaker's typing notice in a room on or off.

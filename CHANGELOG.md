@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `chat.Driver.SendFile` and `(*chat.Service).Attach`, the room's end of an agent's `attach`: a file is uploaded to the homeserver's media repository as the agent's user and sent as an `m.image` (a PNG, JPEG or GIF whose size is read, with its width and height) or an `m.file`; an SVG is a file until a client is seen to draw one. The caption is the body and the name the `filename`; with no caption the name is the body. `Attach` refuses a file whose bytes are of another kind than it is called (a zip called `notes.txt`, an HTML page called a picture: the bytes are looked at, since the kind is the caller's word), a file over `[chat] max_file` (a size such as `"10MiB"`, default 10 MiB) or of a media type that `[chat] file_kinds` does not list (default `image/*`, `text/*`, `application/pdf`, `application/json`) with an error that says what the room takes: `chat.ErrFileTooLarge`, `chat.ErrFileKind`, `chat.ErrNoRoom`, `chat.ErrChatDown`. A binary kind that the sniffer does not know cannot be sent whatever `file_kinds` lists, since its bytes read as something else: a `.docx` is refused as "its bytes are application/zip".
+
 ### Changed
 
 - The database is of schema version 4: a session's stream may hold a `File` event, a file the session sent to its room, which the transcript page and the raw stream show. A server of version 3 refuses a database of version 4 rather than fail on a transcript that holds one. The step from 3 changes only the version.

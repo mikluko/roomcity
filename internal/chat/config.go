@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -45,6 +46,11 @@ type Config struct {
 	// as "1h"; what is older is left out, and the room says so. 0 is
 	// DefaultCatchUp.
 	CatchUp Duration `toml:"catch_up"`
+	// MaxFile is the largest file an agent may send to its room, such as
+	// "10MiB"; 0 is DefaultMaxFile. FileKinds are the media types it may
+	// send, each a type or a type and "/*"; none is DefaultFileKinds.
+	MaxFile   Size     `toml:"max_file"`
+	FileKinds []string `toml:"file_kinds"`
 }
 
 // Holder is a chat id and the role it holds in the city.
@@ -57,6 +63,11 @@ type Holder struct {
 func (c Config) Validate() error {
 	if c.CatchUp < 0 {
 		return fmt.Errorf("chat: catch_up is negative")
+	}
+	for _, kind := range c.FileKinds {
+		if _, err := path.Match(kind, ""); err != nil || !strings.Contains(kind, "/") {
+			return fmt.Errorf("chat: file_kinds has %q, which is not a media type such as image/png or image/*", kind)
+		}
 	}
 	for _, h := range c.Holders {
 		if strings.TrimSpace(h.ID) == "" {

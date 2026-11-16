@@ -36,6 +36,10 @@ type Service struct {
 	// CatchUp is how old an event may be and still be shown when a room is
 	// brought up to date; zero means DefaultCatchUp.
 	CatchUp time.Duration
+	// MaxFile and FileKinds bound what Attach sends: zero and none are
+	// DefaultMaxFile and DefaultFileKinds.
+	MaxFile   Size
+	FileKinds []string
 
 	space, journal RoomID
 	ready          chan struct{} // closed once the space and the journal are made

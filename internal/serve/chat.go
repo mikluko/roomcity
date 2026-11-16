@@ -56,6 +56,8 @@ func newChatSide(cfg config.Config, reg *session.Registry, log *slog.Logger) (*c
 			City:        name,
 			Transcripts: cfg.Chat.Transcripts,
 			CatchUp:     cfg.Chat.CatchUpWindow(),
+			MaxFile:     cfg.Chat.MaxFile,
+			FileKinds:   cfg.Chat.FileKinds,
 		},
 	}, nil
 }

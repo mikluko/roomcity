@@ -56,12 +56,31 @@ type fakeDriver struct {
 	// failBody that of one it cannot take now: it is out of reach for it.
 	refuse   string
 	failBody string
+	// files are the files sent; fileErr is what SendFile returns instead.
+	files   []sentFile
+	fileErr error
 }
 
 func (d *fakeDriver) setFailBody(body string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.failBody = body
+}
+
+type sentFile struct {
+	Room    chat.RoomID
+	Speaker string
+	File    chat.File
+}
+
+func (d *fakeDriver) SendFile(_ context.Context, room chat.RoomID, speaker string, f chat.File) (chat.MessageID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fileErr != nil {
+		return "", d.fileErr
+	}
+	d.files = append(d.files, sentFile{room, speaker, f})
+	return chat.MessageID("$file " + f.Name), nil
 }
 
 func (d *fakeDriver) setDown(down bool) {
