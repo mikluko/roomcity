@@ -868,3 +868,44 @@ func TestAProvidersEnvironmentReachesThePodAndWhatThePodHasOfItsOwnDoesNot(t *te
 	require.Contains(t, logged.String(), "PATH")
 	require.NotContains(t, logged.String(), "hunter2", "the log names the variable, never its value")
 }
+
+func TestAStartKeepsTheIdOfGcsSessionBeadForAReset(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+
+	starts, err := f.reg.Starts(f.ctx, "w-1")
+	require.NoError(t, err)
+	require.Len(t, starts, 1)
+	require.Equal(t, "gc-7", starts[0].GCID, "GC_SESSION_ID of the start config")
+}
+
+func TestAStartThatFailedAndABoxFoundDeadAreNotRecordedAsStops(t *testing.T) {
+	f := newFixture(t, operate.Config{StartTimeout: 150 * time.Millisecond})
+	// No pod ever answers: the start fails.
+	require.Equal(t, int32(1), f.do("start", f.startConfig(map[string]any{"nudge": ""}), "w-1").ExitCode)
+	starts, err := f.reg.Starts(f.ctx, "w-1")
+	require.NoError(t, err)
+	require.Equal(t, "failed", starts[0].How)
+
+	// A session that runs, whose pod is lost, found dead by gc and killed.
+	g := newFixture(t, operate.Config{})
+	startRunning(t, g, "w-2")
+	cur := observe(t, g, "w-2").Object
+	g.jobs.mu.Lock()
+	g.jobs.alive["w-2"] = false
+	g.jobs.mu.Unlock()
+	body, err := json.Marshal(map[string]any{"object": cur, "mode": "corpse"})
+	require.NoError(t, err)
+	require.Equal(t, "killed", string(g.do("kill-object", string(body), "w-2").Stdout))
+	starts, err = g.reg.Starts(g.ctx, "w-2")
+	require.NoError(t, err)
+	require.Equal(t, "lost", starts[0].How)
+
+	// An ordinary stop is a stop.
+	h := newFixture(t, operate.Config{})
+	startRunning(t, h, "w-3")
+	require.Zero(t, h.do("stop", "", "w-3").ExitCode)
+	starts, err = h.reg.Starts(h.ctx, "w-3")
+	require.NoError(t, err)
+	require.Equal(t, "stop", starts[0].How)
+}

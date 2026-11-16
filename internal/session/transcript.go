@@ -134,7 +134,7 @@ func (r *Registry) purgeOne(ctx context.Context, name string, before time.Time) 
 			return nil
 		}
 		gone = true
-		for _, table := range []string{"events", "instructions", "marks", "bundles"} {
+		for _, table := range []string{"events", "instructions", "marks", "bundles", "starts"} {
 			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE session = ?`, name); err != nil {
 				return err
 			}

@@ -9,13 +9,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 1
+// schemaVersion is the version of the database's layout, kept in its
+// user_version. A database of an earlier version is migrated when it is
+// opened (migrate), one that is of a later version is refused.
+const schemaVersion = 2
 
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -28,7 +32,22 @@ CREATE TABLE IF NOT EXISTS sessions (
 	inst_seq   INTEGER NOT NULL DEFAULT 0,
 	new_req    TEXT NOT NULL DEFAULT '',
 	epoch      INTEGER NOT NULL DEFAULT 0,
-	rev       INTEGER NOT NULL DEFAULT 0
+	rev        INTEGER NOT NULL DEFAULT 0,
+	gc_id      TEXT NOT NULL DEFAULT '',
+	shown      INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS starts (
+	session   TEXT NOT NULL,
+	n         INTEGER NOT NULL,
+	began     INTEGER NOT NULL,
+	ended     INTEGER NOT NULL DEFAULT 0,
+	how       TEXT NOT NULL DEFAULT '',
+	room      TEXT NOT NULL DEFAULT '',
+	gc_id     TEXT NOT NULL DEFAULT '',
+	first_seq INTEGER NOT NULL,
+	last_seq  INTEGER NOT NULL DEFAULT 0,
+	reset     INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (session, n)
 );
 CREATE TABLE IF NOT EXISTS events (
 	session   TEXT NOT NULL,
@@ -82,10 +101,14 @@ const (
 type Registry struct {
 	db  *sql.DB
 	now func() time.Time
+	// backup is the copy of the database as it was that Open made before it
+	// migrated it; "" when it migrated nothing.
+	backup string
 
 	mu       sync.Mutex
 	waits    map[chan struct{}]struct{}
 	activity map[string]*activityState
+	resetter func(ctx context.Context, gcID string) error
 
 	activityMu sync.Mutex
 }
@@ -110,15 +133,28 @@ func Open(ctx context.Context, path string) (*Registry, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if version != 0 && version != schemaVersion {
+	if version > schemaVersion {
 		_ = db.Close()
 		return nil, fmt.Errorf("session: database %s is of schema version %d, this server's is %d", path, version, schemaVersion)
+	}
+	var backup string
+	if version != 0 && version < schemaVersion {
+		var err error
+		if backup, err = copyBeforeMigrating(ctx, db, path, version); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if err := migrate(ctx, db, version); err != nil {
+			_ = db.Close()
+			_ = os.Remove(backup) // the database is as it was; the copy would only block the next try
+			return nil, fmt.Errorf("session: migrating %s from schema version %d: %w", path, version, err)
+		}
 	}
 	if _, err := db.ExecContext(ctx, schema+fmt.Sprintf("PRAGMA user_version = %d;", schemaVersion)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("session: schema: %w", err)
 	}
-	return &Registry{db: db, now: time.Now, waits: map[chan struct{}]struct{}{}, activity: map[string]*activityState{}}, nil
+	return &Registry{db: db, now: time.Now, waits: map[chan struct{}]struct{}{}, activity: map[string]*activityState{}, backup: backup}, nil
 }
 
 // Close closes the database.
@@ -181,6 +217,22 @@ func (r *Registry) Authorize(name, token string) bool {
 // the queue of instructions is emptied, the host's frames count from 1
 // again, the earlier token stops working, and the event numbering goes on.
 func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (string, error) {
+	return r.StartWith(ctx, name, agent, kind, StartInfo{})
+}
+
+// StartInfo is what gc told the runtime of a start that the registry keeps
+// with it.
+type StartInfo struct {
+	// GCID is the id of gc's session bead, GC_SESSION_ID of the start's
+	// environment; `gc session reset` takes it.
+	GCID string
+}
+
+// StartWith is Start with what gc told of the start. It opens the session's
+// next start: the start that was open is closed, as "reset" when Reset marked
+// it and as "lost" otherwise, since a session that is started again without
+// having been stopped was lost.
+func (r *Registry) StartWith(ctx context.Context, name, agent string, kind Kind, info StartInfo) (string, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", err
@@ -215,8 +267,11 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 		if _, err := tx.Exec(`DELETE FROM bundles WHERE session = ?`, name); err != nil {
 			return err
 		}
-		_, err := r.appendEvent(tx, name, Lifecycle{Kind: lk})
-		return err
+		seq, err := r.appendEvent(tx, name, Lifecycle{Kind: lk})
+		if err != nil {
+			return err
+		}
+		return r.openStart(tx, name, seq, info.GCID)
 	})
 	if err != nil {
 		return "", err
@@ -225,8 +280,48 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 	return token, nil
 }
 
+// openStart closes the start that is open and records the one that the event
+// at seq opens. The session's Shown cursor is the chat side's and a start
+// leaves it where it is: it runs through the new start's own events.
+func (r *Registry) openStart(tx *sql.Tx, name string, seq uint64, gcID string) error {
+	if _, err := tx.Exec(`
+		UPDATE starts SET ended = ?, last_seq = ?, how = CASE WHEN reset = 1 THEN 'reset' ELSE 'lost' END
+		WHERE session = ? AND ended = 0`, r.now().UnixNano(), seq-1, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO starts (session, n, began, gc_id, first_seq)
+		VALUES (?, COALESCE((SELECT MAX(n) FROM starts WHERE session = ?), 0) + 1, ?, ?, ?)`,
+		name, name, r.now().UnixNano(), gcID, seq); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE sessions SET gc_id = ? WHERE name = ?`, gcID, name)
+	return err
+}
+
 // End records the end of the session.
 func (r *Registry) End(ctx context.Context, name string) error {
+	return r.EndAs(ctx, name, HowStop)
+}
+
+// How a start ended, as Start.How says it.
+const (
+	// HowStop is a stop that was asked for, by gc or by the owner.
+	HowStop = "stop"
+	// HowReset is a stop that Reset asked for.
+	HowReset = "reset"
+	// HowFailed is a start that did not come up: its pod ended, or the agent
+	// did not answer in time.
+	HowFailed = "failed"
+	// HowLost is a start whose box was found dead, or that the next start found
+	// open: a pod lost without a stop.
+	HowLost = "lost"
+)
+
+// EndAs is End for a caller that knows how the start ended: HowStop,
+// HowFailed or HowLost. A stop or a loss of a start that Reset marked is a
+// reset.
+func (r *Registry) EndAs(ctx context.Context, name, how string) error {
 	err := r.tx(ctx, func(tx *sql.Tx) error {
 		if err := r.setState(tx, name, Ended); err != nil {
 			return err
@@ -236,7 +331,13 @@ func (r *Registry) End(ctx context.Context, name string) error {
 		if err := r.dropOwnersPrompts(tx, name); err != nil {
 			return err
 		}
-		_, err := r.appendEvent(tx, name, Lifecycle{Kind: Stopped})
+		seq, err := r.appendEvent(tx, name, Lifecycle{Kind: Stopped})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			UPDATE starts SET ended = ?, last_seq = ?, how = CASE WHEN reset = 1 AND ? IN ('stop', 'lost') THEN 'reset' ELSE ? END
+			WHERE session = ? AND ended = 0`, r.now().UnixNano(), seq, how, how, name)
 		return err
 	})
 	if err == nil {
@@ -297,7 +398,7 @@ func (r *Registry) appendEvent(tx *sql.Tx, name string, e Event) (uint64, error)
 
 // List returns the sessions, ordered by name.
 func (r *Registry) List(ctx context.Context) ([]Info, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT name, agent, kind, state FROM sessions ORDER BY name`)
+	rows, err := r.db.QueryContext(ctx, `SELECT name, agent, kind, state, shown FROM sessions ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +406,7 @@ func (r *Registry) List(ctx context.Context) ([]Info, error) {
 	var out []Info
 	for rows.Next() {
 		var i Info
-		if err := rows.Scan(&i.Name, &i.Agent, &i.Kind, &i.State); err != nil {
+		if err := rows.Scan(&i.Name, &i.Agent, &i.Kind, &i.State, &i.Shown); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -322,7 +423,7 @@ func (r *Registry) Watch(ctx context.Context) (<-chan Info, error) {
 		defer stop()
 		defer close(out)
 		for {
-			rows, err := r.db.QueryContext(ctx, `SELECT name, agent, kind, state, rev FROM sessions ORDER BY name`)
+			rows, err := r.db.QueryContext(ctx, `SELECT name, agent, kind, state, rev, shown FROM sessions ORDER BY name`)
 			if err != nil {
 				return
 			}
@@ -330,7 +431,7 @@ func (r *Registry) Watch(ctx context.Context) (<-chan Info, error) {
 			for rows.Next() {
 				var i Info
 				var rev int64
-				if rows.Scan(&i.Name, &i.Agent, &i.Kind, &i.State, &rev) != nil {
+				if rows.Scan(&i.Name, &i.Agent, &i.Kind, &i.State, &rev, &i.Shown) != nil {
 					break
 				}
 				if seen[i.Name] != rev {
@@ -422,9 +523,9 @@ func (r *Registry) eventsAfter(ctx context.Context, name string, after uint64) (
 		case eventFrame:
 			out = append(out, Frame{Seq: seq, Time: time.Unix(0, at), Direction: Direction(direction), Message: message})
 		case eventPrompt:
-			out = append(out, Prompt{Seq: seq, Source: Source(source), Text: text, State: PromptState(pstate), Of: of})
+			out = append(out, Prompt{Seq: seq, Time: time.Unix(0, at), Source: Source(source), Text: text, State: PromptState(pstate), Of: of})
 		case eventLifecycle:
-			out = append(out, Lifecycle{Seq: seq, Kind: LifecycleKind(lkind)})
+			out = append(out, Lifecycle{Seq: seq, Time: time.Unix(0, at), Kind: LifecycleKind(lkind)})
 		}
 	}
 	return out, rows.Err()

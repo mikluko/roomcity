@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The registry keeps each start of a session: a number, when it began and ended, how it ended (`stop`; `reset`; `failed` for a start that did not come up; `lost` for a box found dead, or a pod lost without a stop), its chat room, the id of gc's session bead and the first and last event of it, so that one name has a transcript for each start (`Registry.Starts`, `SetRoom`). One numbering of events still runs across the starts.
+- `Service.Reset` starts a session afresh by running `gc session reset` on the id of its bead in the city's directory; the stop and the start that follow end the start as a reset.
+- `Info.Shown` and `Service.Shown`: a cursor, kept by the registry, of what the chat side has shown of a session, which advances and never goes back and which a start afresh leaves where it is. `Prompt` and `Lifecycle` events carry the time they were recorded, as `Frame` does.
+
 ### Changed
 
+- The database is of schema version 2. A database of version 1 is migrated when the server opens it, after the server has written SQLite's own consistent copy of it as it was beside it (`roomcity.v1.<time>.db`: the name carries the time, so no copy that exists is in the way or replaced; the server logs its path and keeps it until an operator removes it; the README says how a rollback uses it), in one transaction: the sessions get the bead id and the cursor (at their last event, so that nothing already shown is shown again), and each Started or StartedAfresh event of the stream becomes a start, and the start that runs takes the id of gc's session bead from its session's marks, so that a session already running can be reset. A database of a later version is refused.
 - `examples/minimal`: the Role gives the server only the rights its calls use (no watch, no right to make or delete a pod), and the StatefulSet has `fsGroup: 1000`, which a block volume needs for the pod's user to write it; a test holds its pack range to admit the newest release, as it does the image.
 - `examples/minimal`'s README says more of what must be there before it (a homeserver in the cluster and how Tuwunel reads a registration, the pod's egress, a Dolt server that takes a connection without TLS), names each value to replace once with every place it stands in, says what a registration token may be and how to make one, and says how to look at the pod once it is applied. The README's note that no session had run end to end is gone.
 

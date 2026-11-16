@@ -28,12 +28,27 @@ func ctxT(t *testing.T) context.Context {
 	return ctx
 }
 
+// untimed drops the time of a Prompt or a Lifecycle, which a test of what
+// happened, and not when, compares without. A Frame keeps its own: the host
+// gave it.
+func untimed[T any](v T) T {
+	switch e := any(v).(type) {
+	case session.Prompt:
+		e.Time = time.Time{}
+		return any(e).(T)
+	case session.Lifecycle:
+		e.Time = time.Time{}
+		return any(e).(T)
+	}
+	return v
+}
+
 func recv[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
 	select {
 	case v, ok := <-ch:
 		require.True(t, ok, "channel closed")
-		return v
+		return untimed(v)
 	case <-time.After(5 * time.Second):
 		t.Fatal("nothing received")
 		panic("unreachable")
@@ -691,7 +706,7 @@ func TestStopClosesTheRecordOfEveryOwnersPromptThatWaitsAndOnlyThose(t *testing.
 		}
 	}
 	require.Len(t, closed, 1, "the prompt that waited, once, though Cancel ran twice: %+v", closed)
-	require.Equal(t, session.Prompt{Seq: closed[0].Seq, Source: session.FromOwner, Text: "waits", State: session.Dropped, Of: waits}, closed[0])
+	require.Equal(t, session.Prompt{Seq: closed[0].Seq, Source: session.FromOwner, Text: "waits", State: session.Dropped, Of: waits}, untimed(closed[0]))
 	require.NotEqual(t, first, closed[0].Of)
 }
 

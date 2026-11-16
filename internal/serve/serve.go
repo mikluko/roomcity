@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -81,6 +83,29 @@ type Options struct {
 // purgeEvery is how often the transcripts past their term are removed.
 const purgeEvery = time.Hour
 
+// resetter asks gc to reset a session: `gc session reset <id of its bead>`, run
+// in the city's directory as gc's own command through the server, as the stand-in
+// gc's calls are. gc stops the session's runtime and starts it again, which
+// the runtime sees as a stop and a start of the same name.
+func resetter(cfg config.Config) func(ctx context.Context, gcID string) error {
+	return func(ctx context.Context, gcID string) error {
+		ctx, cancel := context.WithTimeout(ctx, resetTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, cfg.Server.Gc, "session", "reset", gcID)
+		cmd.Dir = cfg.Server.CityDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("gc session reset %s: %w: %s", gcID, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+}
+
+// resetTimeout is how long gc gets to take a reset: it writes the request on
+// the session's bead and wakes the controller, and the stop and the start
+// come afterwards, on their own.
+const resetTimeout = 30 * time.Second
+
 // purgeTranscripts removes the transcripts of sessions that ended more than
 // term ago, now and then, until ctx ends.
 func purgeTranscripts(ctx context.Context, reg *session.Registry, term, every time.Duration, log *slog.Logger) {
@@ -119,7 +144,11 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
+	if backup := reg.BackupPath(); backup != "" {
+		log.Info("migrated the database; the copy of it as it was, which a server of the earlier version runs on, is kept until an operator removes it", "copy", backup)
+	}
 	defer func() { _ = reg.Close() }()
+	reg.SetResetter(resetter(cfg))
 
 	s := server.New()
 	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg}))

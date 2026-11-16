@@ -377,7 +377,7 @@ func (o *Operator) remove(ctx context.Context, name string, b box) error {
 		return o.reg.ClearMarks(ctx, name)
 	}
 	if info, err := o.reg.Get(ctx, name); err == nil && info.State != session.Ended {
-		if err := o.reg.End(ctx, name); err != nil {
+		if err := o.reg.EndAs(ctx, name, session.HowLost); err != nil {
 			return err
 		}
 	} else if err != nil && !errors.Is(err, session.ErrNotFound) {

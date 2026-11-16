@@ -63,6 +63,22 @@ Two limits, from the server's not being able to read or list Secrets:
 - A server that dies between making a session's Secret and making its Job leaves a Secret that nothing owns. The server cannot list Secrets to find it; the next start of the same session overwrites it and a stop of that name deletes it, and otherwise it stays until someone deletes it.
 - Starts of one name are serialized by the server and only the server makes a session's Job, so a Job that appears between the start's check for one and its own creation, made by hand, would find its Secret overwritten.
 
+## The database and its upgrades
+
+The server keeps the sessions, their events, their queues and the transcripts in one SQLite database, `roomcity.db` in `[server] data`, and its layout has a version (`PRAGMA user_version`).
+A server that opens a database of an earlier version migrates it, in one transaction, and a server that opens one of a later version refuses it and does not start.
+
+Before it migrates, the server writes SQLite's own consistent copy of the database as it was, beside it, under a name that carries the old version and the time: `roomcity.v1.20261116T120000Z.db` for a migration from version 1 at that time.
+It logs the path; the copy is whole when it is there, and the migration goes on only after it.
+A copy is never in the server's way: the name is of the second, takes a number when it is taken, and no copy that exists is replaced or makes the server refuse to start.
+A migration that fails removes the copy of its own try.
+The server keeps the copies until an operator removes them.
+
+A rollback to a server of the earlier version needs the copy: the older server refuses the migrated database.
+Stop the server, put the copy in place of `roomcity.db` (remove `roomcity.db-wal` and `roomcity.db-shm` with it), and run the older server.
+What the migrated database recorded after the copy was made is lost with it.
+Lowering `user_version` by hand is not a way back.
+
 ## Develop
 
 Go 1.27.4 or later and [buf](https://buf.build/docs/cli/installation/) are required.

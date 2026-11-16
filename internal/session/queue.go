@@ -617,7 +617,7 @@ func (r *Registry) ClearMarks(ctx context.Context, name string) error {
 // Get returns the session's Info.
 func (r *Registry) Get(ctx context.Context, name string) (Info, error) {
 	i := Info{Name: name}
-	err := r.db.QueryRowContext(ctx, `SELECT agent, kind, state FROM sessions WHERE name = ?`, name).Scan(&i.Agent, &i.Kind, &i.State)
+	err := r.db.QueryRowContext(ctx, `SELECT agent, kind, state, shown FROM sessions WHERE name = ?`, name).Scan(&i.Agent, &i.Kind, &i.State, &i.Shown)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Info{}, ErrNotFound
 	}

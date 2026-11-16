@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 
 	"sarak.sh/mikluko/roomcity/internal/session"
@@ -26,6 +27,8 @@ type Sessions struct {
 	cancels    map[string]int
 	answers    []PermissionAnswer
 	subscribed map[string]int
+	shown      map[string]uint64
+	resets     []string
 
 	// PromptErr, when set, is what Prompt returns, and the prompt is not kept.
 	PromptErr error
@@ -146,6 +149,42 @@ func (s *Sessions) Cancels(name string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cancels[name]
+}
+
+// Shown implements session.Service: it records the highest seq it was given
+// for the session, as Info.Shown, and moves nothing back.
+func (s *Sessions) Shown(_ context.Context, name string, seq uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shown == nil {
+		s.shown = map[string]uint64{}
+	}
+	if seq > s.shown[name] {
+		s.shown[name] = seq
+	}
+	return nil
+}
+
+// ShownSeq returns the highest seq the session was said to have shown.
+func (s *Sessions) ShownSeq(name string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shown[name]
+}
+
+// Reset implements session.Service: it records the request.
+func (s *Sessions) Reset(_ context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resets = append(s.resets, name)
+	return nil
+}
+
+// Resets returns the names of the sessions that were reset, in order.
+func (s *Sessions) Resets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.resets)
 }
 
 // AnswerPermission implements session.Service.

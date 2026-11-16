@@ -47,8 +47,13 @@ func TestHostHandledWritesWhatBecameOfAPromptOnceAndInOrder(t *testing.T) {
 	require.NoError(t, handled(roomcityv1.Handling_HANDLING_STARTED))
 	require.NoError(t, handled(roomcityv1.Handling_HANDLING_STARTED))
 
-	waiting := <-events
-	delivered := <-events
+	untimed := func(e session.Event) session.Event {
+		p := e.(session.Prompt)
+		p.Time = time.Time{}
+		return p
+	}
+	waiting := untimed(<-events)
+	delivered := untimed(<-events)
 	require.Equal(t, session.Prompt{Seq: stored + 1, Source: session.FromOwner, Text: "steer", State: session.Waiting, Of: stored}, waiting)
 	require.Equal(t, session.Prompt{Seq: stored + 2, Source: session.FromOwner, Text: "steer", State: session.Delivered, Of: stored}, delivered)
 }

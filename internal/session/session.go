@@ -43,6 +43,10 @@ type Info struct {
 	Agent string
 	Kind  Kind
 	State State
+	// Shown is the Seq of the last event of the session that the chat side
+	// has shown; Service.Shown advances it. A start leaves it where it is:
+	// it runs through the new start's own events as the chat side shows them.
+	Shown uint64
 }
 
 // Direction says which way a frame went between the session host and the
@@ -109,7 +113,9 @@ const (
 // waits from one the agent has taken. The frame that carries the prompt to
 // the agent comes in the stream as well.
 type Prompt struct {
-	Seq    uint64
+	Seq uint64
+	// Time is when the server recorded it.
+	Time   time.Time
 	Source Source
 	Text   string
 	State  PromptState
@@ -134,7 +140,9 @@ const (
 
 // Lifecycle is a change in the life of a session.
 type Lifecycle struct {
-	Seq  uint64
+	Seq uint64
+	// Time is when the server recorded it.
+	Time time.Time
 	Kind LifecycleKind
 }
 
@@ -179,6 +187,15 @@ type Service interface {
 	// session that has ended gives ErrNotRunning, and one gc has not
 	// started yet ErrNotFound.
 	Prompt(ctx context.Context, name string, in PromptInput) (uint64, error)
+	// Shown records that the events of the session up to seq have been shown:
+	// Info.Shown advances to it, never back, and a smaller seq changes
+	// nothing.
+	Shown(ctx context.Context, name string, seq uint64) error
+	// Reset starts the session afresh: gc is asked to stop it and start it
+	// again, which ends the session's current start as how "reset" and
+	// begins the next. It returns ErrNotRunning for a session that has
+	// ended, and an error when gc refuses.
+	Reset(ctx context.Context, name string) error
 	// Cancel is the server's whole share of !stop: it ends the running turn,
 	// drops the owner's prompts that wait, each closed with a Dropped
 	// record, keeps gc's nudges that wait and withdraws an open permission

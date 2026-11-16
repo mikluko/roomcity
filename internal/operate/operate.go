@@ -410,7 +410,7 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	if err := o.jobs.Delete(ctx, name); err != nil {
 		return failf("start %s: %v", name, err)
 	}
-	token, err := o.reg.Start(ctx, name, agent, kind)
+	token, err := o.reg.StartWith(ctx, name, agent, kind, session.StartInfo{GCID: sc.Env["GC_SESSION_ID"]})
 	if err != nil {
 		return failf("start %s: %v", name, err)
 	}
@@ -418,7 +418,7 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = o.jobs.Delete(cleanup, name)
-		_ = o.reg.End(cleanup, name)
+		_ = o.reg.EndAs(cleanup, name, session.HowFailed)
 		return failf(format, a...)
 	}
 
