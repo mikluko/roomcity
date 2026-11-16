@@ -406,9 +406,9 @@ func TestAWaitSurvivesAStopAndStartAndTellsOnce(t *testing.T) {
 
 	gc := &waitTaskGc{status: "in_progress"}
 	var told []string
-	w := &gcwork.Work{Gc: gc, Marks: f.reg, Sessions: f.reg, Nudge: func(_ context.Context, _, text string) error {
+	w := &gcwork.Work{Gc: gc, Marks: f.reg, Sessions: f.reg, Nudge: func(ctx context.Context, name, text string) (uint64, error) {
 		told = append(told, text)
-		return nil
+		return f.reg.Nudge(ctx, name, text)
 	}}
 	require.NoError(t, w.Wait(f.ctx, "w-1", "bd-7"))
 	require.NoError(t, f.reg.SetMark(f.ctx, "w-1", gcwork.ClaimedMark, "bd-8"))
@@ -431,6 +431,10 @@ func TestAWaitSurvivesAStopAndStartAndTellsOnce(t *testing.T) {
 	w.Poll(f.ctx)
 	require.Len(t, told, 1)
 	require.Contains(t, told[0], "Task bd-7 is closed")
+	w.Poll(f.ctx)
+	require.Len(t, told, 1, "the close is told once while the telling is pending")
+	require.NoError(t, f.reg.Handled(f.ctx, "w-1", 1, session.BeganTurn))
+	w.Poll(f.ctx)
 	waits, err = f.reg.Mark(f.ctx, "w-1", gcwork.WaitsMark)
 	require.NoError(t, err)
 	require.Empty(t, waits)

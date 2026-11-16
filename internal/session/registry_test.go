@@ -853,3 +853,34 @@ func TestAStartsIdentityIsKeptAsMarksAndTheOnesGcStampsMove(t *testing.T) {
 	_, ok, _ = r.Identity(ctx, "s")
 	require.False(t, ok, "a start afresh clears the record before it makes its own")
 }
+
+func TestPromptEndSaysDeliveredDroppedOrNeither(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	taken, err := r.Nudge(ctx, "s", "taken")
+	require.NoError(t, err)
+	held, err := r.Nudge(ctx, "s", "held")
+	require.NoError(t, err)
+	pending, err := r.Nudge(ctx, "s", "open")
+	require.NoError(t, err)
+	require.NoError(t, r.Handled(ctx, "s", 1, session.BeganTurn))
+	require.NoError(t, r.Handled(ctx, "s", 2, session.Queued))
+
+	for seq, want := range map[uint64]session.PromptState{taken: session.Delivered, held: session.Stored, pending: session.Stored} {
+		got, err := r.PromptEnd(ctx, "s", seq)
+		require.NoError(t, err)
+		require.Equal(t, want, got, seq)
+	}
+	_, err = r.PromptEnd(ctx, "s", 999)
+	require.ErrorIs(t, err, session.ErrNotFound)
+
+	require.NoError(t, r.End(ctx, "s"))
+	got, err := r.PromptEnd(ctx, "s", held)
+	require.NoError(t, err)
+	require.Equal(t, session.Dropped, got)
+	got, err = r.PromptEnd(ctx, "s", taken)
+	require.NoError(t, err)
+	require.Equal(t, session.Delivered, got)
+}

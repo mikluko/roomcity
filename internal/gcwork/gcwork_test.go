@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
@@ -137,16 +138,21 @@ type nudges struct {
 	sent []string
 }
 
-func (n *nudges) nudge(_ context.Context, session, text string) error {
+func (n *nudges) nudge(_ context.Context, session, text string) (uint64, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.sent = append(n.sent, session+": "+text)
-	return nil
+	return uint64(len(n.sent)), nil
 }
 
 type running []session.Info
 
 func (r running) List(context.Context) ([]session.Info, error) { return r, nil }
+
+// PromptEnd answers that every telling was delivered.
+func (r running) PromptEnd(context.Context, string, uint64) (session.PromptState, error) {
+	return session.Delivered, nil
+}
 
 type gcFunc func(context.Context, string, []string, []byte) (gchandler.Result, error)
 
@@ -168,6 +174,8 @@ func TestWaitIsKeptAndTheSessionIsToldWhenTheTaskIsClosedOnce(t *testing.T) {
 
 	w.Poll(ctx)
 	require.Equal(t, []string{"foreman-1: Task bd-7 is closed. Read what came of it with the tool result."}, n.sent)
+	require.Equal(t, "bd-7@1", m["foreman-1/"+gcwork.WaitsMark], "the wait lasts until the telling is delivered")
+	w.Poll(ctx)
 	require.Empty(t, m["foreman-1/"+gcwork.WaitsMark])
 	w.Poll(ctx)
 	require.Len(t, n.sent, 1, "told once")
@@ -430,6 +438,7 @@ func TestRewritingWaitsForgetsRemovedReadFailures(t *testing.T) {
 
 	m["foreman-1/"+gcwork.WaitsMark] = "bd-8"
 	w.Poll(context.Background())
+	w.Poll(context.Background())
 	require.Empty(t, m["foreman-1/"+gcwork.WaitsMark])
 	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
 	w.Poll(context.Background())
@@ -566,4 +575,174 @@ func TestAReasonIsCutOnACharacterAndNeverLeavesAnInvalidOne(t *testing.T) {
 	for _, line := range ran(t, log) {
 		require.True(t, utf8.ValidString(line), line)
 	}
+}
+
+// registryRunning is a registry whose sessions all list as Running.
+type registryRunning struct{ *session.Registry }
+
+func (r registryRunning) List(ctx context.Context) ([]session.Info, error) {
+	all, err := r.Registry.List(ctx)
+	for i := range all {
+		all[i].State = session.Running
+	}
+	return all, err
+}
+
+type telling struct {
+	t    *testing.T
+	ctx  context.Context
+	path string
+	reg  *session.Registry
+	w    *gcwork.Work
+}
+
+func newTelling(t *testing.T) *telling {
+	t.Helper()
+	f := &telling{t: t, ctx: context.Background(), path: filepath.Join(t.TempDir(), "r.db")}
+	f.w, _, _ = work(t, "STATUS=closed")
+	f.open()
+	_, err := f.reg.Start(f.ctx, "foreman-1", "foreman", session.AlwaysOn)
+	require.NoError(t, err)
+	require.NoError(t, f.w.Wait(f.ctx, "foreman-1", "bd-7"))
+	return f
+}
+
+func (f *telling) open() {
+	f.t.Helper()
+	reg, err := session.Open(f.ctx, f.path)
+	require.NoError(f.t, err)
+	f.t.Cleanup(func() { _ = reg.Close() })
+	f.reg = reg
+	f.w.Marks = reg
+	f.w.Sessions = registryRunning{reg}
+	f.w.Nudge = reg.Nudge
+}
+
+func (f *telling) restart() {
+	f.t.Helper()
+	require.NoError(f.t, f.reg.Close())
+	f.open()
+}
+
+func (f *telling) startAfresh() {
+	f.t.Helper()
+	_, err := f.reg.Start(f.ctx, "foreman-1", "foreman", session.AlwaysOn)
+	require.NoError(f.t, err)
+}
+
+// told counts the Stored records of the closed-task telling.
+func (f *telling) told() int {
+	f.t.Helper()
+	evs, err := f.reg.Tail(f.ctx, "foreman-1", 1000)
+	require.NoError(f.t, err)
+	n := 0
+	for _, e := range evs {
+		if p, ok := e.(session.Prompt); ok && p.State == session.Stored && p.Source == session.FromGC && strings.HasPrefix(p.Text, "Task bd-7 is closed") {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *telling) waits() string {
+	f.t.Helper()
+	v, err := f.reg.Mark(f.ctx, "foreman-1", gcwork.WaitsMark)
+	require.NoError(f.t, err)
+	return v
+}
+
+func TestATellingHeldThroughATurnAndDroppedByAStartAfreshIsToldAgainOnce(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	require.NoError(t, f.reg.Handled(f.ctx, "foreman-1", 1, session.Queued))
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told(), "a telling that is held is not told again")
+
+	f.startAfresh()
+	f.w.Poll(f.ctx)
+	require.Equal(t, 2, f.told(), "the fresh session is told")
+	f.w.Poll(f.ctx)
+	require.Equal(t, 2, f.told())
+
+	require.NoError(t, f.reg.Handled(f.ctx, "foreman-1", 1, session.BeganTurn))
+	f.w.Poll(f.ctx)
+	f.w.Poll(f.ctx)
+	require.Equal(t, 2, f.told(), "told once to the fresh session")
+	require.Empty(t, f.waits())
+}
+
+func TestATellingHandedToTheHostAndDroppedThereByAStartAfreshIsToldAgain(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	in, err := f.reg.Instructions(f.ctx, "foreman-1", 0)
+	require.NoError(t, err)
+	got := <-in
+	require.Equal(t, session.InstructionPrompt, got.Kind)
+
+	f.startAfresh()
+	f.w.Poll(f.ctx)
+	require.Equal(t, 2, f.told(), "a prompt the host was handed and the agent never took is told again")
+}
+
+func TestATellingDeliveredEndsTheWaitAndIsNotQueuedAgain(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	require.Equal(t, "bd-7@2", f.waits(), "the wait is kept until the agent takes the telling")
+	require.NoError(t, f.reg.Handled(f.ctx, "foreman-1", 1, session.Steered))
+	f.w.Poll(f.ctx)
+	require.Empty(t, f.waits())
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told())
+}
+
+func TestNoSecondTellingIsQueuedWhileOneIsPendingAcrossARestartOfTheServer(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	f.restart()
+	f.w.Poll(f.ctx)
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told())
+	require.Equal(t, "bd-7@2", f.waits())
+}
+
+func TestATaskClosedAndToldAcrossARestartOfTheServerIsToldOnce(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	f.restart()
+	require.NoError(t, f.reg.Handled(f.ctx, "foreman-1", 1, session.BeganTurn))
+	f.w.Poll(f.ctx)
+	f.restart()
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told())
+	require.Empty(t, f.waits())
+}
+
+func TestADroppedTellingDoesNotBringBackAWaitThatWasRemoved(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	require.NoError(t, f.reg.SetMark(f.ctx, "foreman-1", gcwork.WaitsMark, ""))
+	f.startAfresh()
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told())
+	require.Empty(t, f.waits())
+}
+
+func TestATellingWhoseRecordsWerePurgedIsToldOnceMoreAndNotAtEachPoll(t *testing.T) {
+	f := newTelling(t)
+	f.w.Poll(f.ctx)
+	f.startAfresh()
+	_, err := f.reg.Purge(f.ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 0, f.told(), "the start that held the telling is gone")
+
+	f.w.Poll(f.ctx)
+	require.Equal(t, 1, f.told())
+	waits := f.waits()
+	require.True(t, strings.HasPrefix(waits, "bd-7@"))
+	require.NotEqual(t, "bd-7@2", waits, "the mark carries the new telling's Seq")
+	for range 3 {
+		f.w.Poll(f.ctx)
+	}
+	require.Equal(t, 1, f.told())
+	require.Equal(t, waits, f.waits())
 }

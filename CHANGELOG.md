@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A wait for a task ends when the agent takes the prompt that tells of its close; a prompt dropped before then, by a start afresh or an end of the session, is queued again.
 - A session that ends or starts afresh closes every queued or held prompt as dropped, gc's nudges included, clearing the room's ⏳.
 
 ## [0.13.0] - 2026-11-16

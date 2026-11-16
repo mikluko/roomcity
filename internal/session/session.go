@@ -93,14 +93,15 @@ const (
 type PromptState int
 
 const (
-	// Stored is a prompt the server holds and has not yet sent on.
+	// Stored is a prompt the server has recorded and the agent has not taken,
+	// whether the server still holds it or the host does.
 	Stored PromptState = iota + 1
 	// Waiting is a prompt that cannot go into the agent's running turn and
 	// waits for the turn's end. It is recorded when the server or the host
 	// finds that it must wait, and not for a prompt that goes at once.
 	Waiting
-	// Delivered is a prompt the server handed to the session host; what the
-	// host did with it is not reported back.
+	// Delivered is a prompt the host reported as taken by the agent, as a new
+	// turn or into the running one.
 	Delivered
 	// Dropped closes the record of a prompt that will not be delivered: one
 	// dropped by the owner's !stop, or one still waiting when its session

@@ -177,11 +177,8 @@ func Run(ctx context.Context, o Options) error {
 		Gc:       gc,
 		Marks:    reg,
 		Sessions: reg,
-		Nudge: func(ctx context.Context, name, text string) error {
-			_, err := reg.Nudge(ctx, name, text)
-			return err
-		},
-		Log: log,
+		Nudge:    reg.Nudge,
+		Log:      log,
 	}
 	watch := &taskwatch.Watch{
 		Sessions:    reg,

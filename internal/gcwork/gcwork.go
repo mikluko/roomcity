@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +22,8 @@ import (
 )
 
 // WaitsMark is the session's mark that holds, by commas, the tasks it asked
-// the server to watch.
+// the server to watch, each as its id or, once the session has been told that
+// it is closed, as the id, "@" and the Seq of the telling's Stored record.
 const WaitsMark = session.WaitsMark
 
 // ClaimedMark is the session's mark that holds the task it claimed, for done.
@@ -65,11 +67,13 @@ type Work struct {
 	Marks Marks
 	Pool  string
 	// Sessions and Nudge are what telling a session about a waited task needs:
-	// the running sessions, and a prompt marked as gc's for one of them.
+	// the running sessions, and a prompt marked as gc's for one of them, whose
+	// Stored Seq Nudge returns. PromptEnd says how the telling ended.
 	Sessions interface {
 		List(ctx context.Context) ([]session.Info, error)
+		PromptEnd(ctx context.Context, name string, seq uint64) (session.PromptState, error)
 	}
-	Nudge func(ctx context.Context, session, text string) error
+	Nudge func(ctx context.Context, session, text string) (uint64, error)
 	// Log gets what Poll cannot do; nil is slog.Default.
 	Log *slog.Logger
 
@@ -181,7 +185,7 @@ func (w *Work) Wait(ctx context.Context, session, task string) error {
 	if err != nil {
 		return err
 	}
-	if slices.Contains(waits, task) {
+	if slices.ContainsFunc(waits, func(w string) bool { return waitedID(w) == task }) {
 		return nil
 	}
 	if _, _, _, _, err := w.result(ctx, session, task); err != nil {
@@ -216,9 +220,28 @@ func (w *Work) Run(ctx context.Context, every time.Duration) {
 	}
 }
 
-// Poll tells each running session once of a waited task that is closed, or
-// that gc has answered with a JSON error object three times in a row. Any
-// other failed read keeps the wait and warns once until a read succeeds.
+// waitedID is the task id of an entry of WaitsMark.
+func waitedID(entry string) string {
+	id, _, _ := strings.Cut(entry, "@")
+	return id
+}
+
+// told is the Seq of the telling an entry of WaitsMark carries, 0 for none.
+func told(entry string) uint64 {
+	_, seq, ok := strings.Cut(entry, "@")
+	if !ok {
+		return 0
+	}
+	n, _ := strconv.ParseUint(seq, 10, 64)
+	return n
+}
+
+// Poll tells each running session of a waited task that is closed, once while
+// the telling is pending, and ends the wait when the agent has taken the
+// telling; a telling that is dropped is told again. A wait whose task gc has
+// answered three times in a row with a JSON error object is dropped after a
+// telling that says so. Any other failed read keeps the wait and warns once
+// until a read succeeds.
 func (w *Work) Poll(ctx context.Context) {
 	log := w.Log
 	if log == nil {
@@ -244,38 +267,59 @@ func (w *Work) pollSession(ctx context.Context, log *slog.Logger, name string) {
 		return
 	}
 	var still []string
-	for _, id := range waits {
-		key := waitedTask{session: name, task: id}
-		closed, _, result, outcome, err := w.pollResult(ctx, name, id)
-		if err != nil {
-			if w.keepAfterReadFailure(ctx, log, key, err) {
-				still = append(still, id)
-			}
-			continue
-		}
-		w.readFailures.Delete(key)
-		if !closed {
-			still = append(still, id)
-			continue
-		}
-		if err := w.Nudge(ctx, name, closedText(id, outcome, result)); err != nil {
-			log.Error("telling a session that its task is closed", "session", name, "task", id, "err", err)
-			still = append(still, id)
+	for _, entry := range waits {
+		if keep, kept := w.pollWait(ctx, log, name, entry); keep {
+			still = append(still, kept)
 		}
 	}
-	if len(still) != len(waits) {
-		if err := w.Marks.SetMark(ctx, name, WaitsMark, strings.Join(still, ",")); err != nil {
-			log.Error("forgetting the tasks a session was told of", "session", name, "err", err)
+	if joined := strings.Join(still, ","); joined != strings.Join(waits, ",") {
+		if err := w.Marks.SetMark(ctx, name, WaitsMark, joined); err != nil {
+			log.Error("recording the tasks a session still waits for", "session", name, "err", err)
 		} else {
 			w.forgetRemovedReadFailures(name, still)
 		}
 	}
 }
 
+// pollWait reports whether the wait of one entry goes on, and the entry it is
+// then recorded as.
+func (w *Work) pollWait(ctx context.Context, log *slog.Logger, name, entry string) (bool, string) {
+	id := waitedID(entry)
+	if seq := told(entry); seq != 0 {
+		end, err := w.Sessions.PromptEnd(ctx, name, seq)
+		switch {
+		case errors.Is(err, session.ErrNotFound) || err == nil && end == session.Dropped:
+			entry = id
+		case err != nil:
+			log.Error("reading how the telling of a closed task ended", "session", name, "task", id, "err", err)
+			return true, entry
+		case end == session.Delivered:
+			return false, ""
+		default:
+			return true, entry
+		}
+	}
+	key := waitedTask{session: name, task: id}
+	closed, _, result, outcome, err := w.pollResult(ctx, name, id)
+	if err != nil {
+		return w.keepAfterReadFailure(ctx, log, key, err), entry
+	}
+	w.readFailures.Delete(key)
+	if !closed {
+		return true, entry
+	}
+	seq, err := w.Nudge(ctx, name, closedText(id, outcome, result))
+	if err != nil {
+		log.Error("telling a session that its task is closed", "session", name, "task", id, "err", err)
+		return true, entry
+	}
+	return true, id + "@" + strconv.FormatUint(seq, 10)
+}
+
 func (w *Work) forgetRemovedReadFailures(name string, waits []string) {
 	w.readFailures.Range(func(key, _ any) bool {
 		k := key.(waitedTask)
-		if k.session == name && !slices.Contains(waits, k.task) {
+		if k.session == name && !slices.ContainsFunc(waits, func(e string) bool { return waitedID(e) == k.task }) {
 			w.readFailures.Delete(key)
 		}
 		return true
@@ -308,7 +352,7 @@ func (w *Work) keepAfterReadFailure(ctx context.Context, log *slog.Logger, key w
 	if state.missing == maxWaitMissingAnswers {
 		log.Warn("a waited task can no longer be read", "session", key.session, "task", key.task, "err", readErr)
 	}
-	if err := w.Nudge(ctx, key.session, unreadableText(key.task)); err != nil {
+	if _, err := w.Nudge(ctx, key.session, unreadableText(key.task)); err != nil {
 		log.Error("telling a session that its task can no longer be read", "session", key.session, "task", key.task, "err", err)
 		return true
 	}

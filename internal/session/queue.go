@@ -472,6 +472,34 @@ func (r *Registry) Handled(ctx context.Context, name string, instruction uint64,
 	return err
 }
 
+// PromptEnd returns Delivered or Dropped for the prompt whose Stored record
+// has Seq seq, and Stored for one the agent has not taken and the server has
+// not dropped, held by the host or not. A seq that names no Stored record of
+// the session is ErrNotFound.
+func (r *Registry) PromptEnd(ctx context.Context, name string, seq uint64) (PromptState, error) {
+	var end PromptState
+	err := r.db.QueryRowContext(ctx, `
+		SELECT pstate FROM events
+		WHERE session = ? AND seq > ? AND kind = ? AND of = ? AND pstate IN (?, ?)
+		ORDER BY seq LIMIT 1`, name, seq, eventPrompt, seq, Delivered, Dropped).Scan(&end)
+	if err == nil {
+		return end, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	var one int
+	err = r.db.QueryRowContext(ctx, `SELECT 1 FROM events WHERE session = ? AND kind = ? AND seq = ? AND pstate = ?`,
+		name, eventPrompt, seq, Stored).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return Stored, nil
+}
+
 // Report stores the frames the host sends and returns the number of the
 // last host frame stored. A frame at or below that number is ignored, so a
 // host that sends frames again after a failed call does no harm; one that
