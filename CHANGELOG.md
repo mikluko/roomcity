@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-16
+
 ### Added
 
 - `[chat] catch_up`, a duration such as `"1h"` (default one hour): how old an event may be and still be shown when a room is brought up to date after an outage. What is older is left out, and the room says so in one notice that links the session's transcript.
@@ -159,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.7.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.8.0...HEAD
+[0.8.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.8.0
 [0.7.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.7.0
 [0.6.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.6.0
 [0.5.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.5.0
