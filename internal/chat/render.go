@@ -291,11 +291,15 @@ func (r *renderer) endTurn() {
 }
 
 // stopped takes the stop that the room itself asked for as the end of the
-// waiting: nothing is typed any longer, and the prompts that waited were
-// dropped with the turn, so their marks go.
+// waiting: nothing is typed any longer, and the owner's prompts that waited
+// were dropped with the turn, so their marks go. gc's nudges are kept and
+// delivered after the stop, so theirs stay.
 func (r *renderer) stopped() {
 	r.setWorking(false)
 	for seq, note := range r.prompts {
+		if note.source == session.FromGC {
+			continue
+		}
 		if note.waiting != "" {
 			r.out.unreact(note.waiting)
 		}

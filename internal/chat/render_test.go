@@ -342,6 +342,19 @@ func TestRendererLetsTheStopTheRoomAskedForEndTheWaiting(t *testing.T) {
 	require.Equal(t, []uint64{5}, out.forgotten)
 }
 
+func TestRendererKeepsTheMarkOfGcsNudgeWhenTheOwnerStops(t *testing.T) {
+	r, out, _ := newTestRenderer()
+	r.event(session.Prompt{Seq: 4, Source: session.FromGC, Text: "nudge", State: session.Stored})
+	r.event(session.Prompt{Seq: 5, State: session.Waiting, Of: 4})
+	require.Equal(t, []string{"m1 ⏳"}, out.reactions)
+
+	r.stopped()
+	require.Empty(t, out.undone, "the nudge is delivered after the stop, so it still waits")
+	require.Empty(t, out.forgotten)
+	r.event(session.Prompt{Seq: 6, State: session.Delivered, Of: 4})
+	require.Equal(t, []ReactionID{"r1"}, out.undone)
+}
+
 func TestRendererShowsTheOutputOfAFailedToolCall(t *testing.T) {
 	r, out, _ := newTestRenderer()
 	r.event(update("tool_call", `"toolCallId":"t1","title":"Run it","status":"pending","rawInput":{"command":"x"}`))

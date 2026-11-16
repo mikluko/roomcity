@@ -364,7 +364,7 @@ func (s *Service) notice(ctx context.Context, t *agentSession, body string, repl
 
 // commands are the messages that begin with "!" and that the runtime answers
 // itself; the agent never sees one.
-const helpText = "Commands: `!stop` ends the running turn and drops what waits; `!help` lists them."
+const helpText = "Commands: `!stop` ends the running turn and drops your messages that wait, while gc's nudges stay and are delivered after it; `!help` lists them."
 
 func (s *Service) command(ctx context.Context, t *agentSession, name string, in Incoming) {
 	word := strings.Fields(in.Body)[0]
@@ -379,7 +379,7 @@ func (s *Service) command(ctx context.Context, t *agentSession, name string, in 
 		case t.inputs <- Incoming{Kind: Text, Body: word}:
 		default:
 		}
-		s.notice(ctx, t, "Asked the agent to stop.", in.Message)
+		s.notice(ctx, t, "Asked the agent to stop: your waiting messages are dropped, gc's nudges stay.", in.Message)
 	case "!help":
 		s.notice(ctx, t, helpText, in.Message)
 	default:
