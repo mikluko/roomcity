@@ -703,6 +703,8 @@ func TestInventoryListsEveryBoxWithItsObjectIdentityAndActivity(t *testing.T) {
 	require.NoError(t, json.Unmarshal(r.Stdout, &empty))
 	require.True(t, empty.Complete)
 	require.Empty(t, empty.Sessions)
+	require.JSONEq(t, `{"complete":true,"sessions":[]}`, string(r.Stdout), "an empty city lists [], never null: gc reads null as no list")
+	require.Contains(t, string(r.Stdout), `"sessions":[]`)
 
 	startRunning(t, f, "w-1")
 	require.Zero(t, f.do("set-meta", "1", "w-1", "GC_RESTART_REQUESTED").ExitCode)

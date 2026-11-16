@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `inventory` of a city that holds no box answers `"sessions":[]` and not `"sessions":null`, which gc read as an answer without sessions and refused, so that no session of the city could start.
+
 ## [0.3.0] - 2026-11-16
 
 ### Added

@@ -273,7 +273,7 @@ func (o *Operator) inventory(ctx context.Context) result {
 	if err != nil {
 		return failf("inventory: %v", err)
 	}
-	var entries []inventoryEntry
+	entries := []inventoryEntry{} // not nil: an empty list is [], and gc reads null as no list
 	seen := map[string]bool{}
 	add := func(name string, b box) error {
 		if seen[name] {
