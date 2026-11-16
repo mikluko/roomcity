@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS gc
 ARG TARGETOS TARGETARCH
 # renovate: datasource=git-refs depName=https://github.com/gastownhall/gascity branch=main
-ARG GC_REVISION=76a06b2327ed1f92f1a3f24dedcba86c5e48a194
+ARG GC_REVISION=c7eb6d2f43ca1c0dec508f043b1e75f25470094a
 WORKDIR /src
 RUN git init -q && \
     git fetch -q --depth 1 https://github.com/gastownhall/gascity.git "$GC_REVISION" && \

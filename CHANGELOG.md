@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated: maunium.net/go/mautrix v0.33.0.
+- Updated: https://github.com/gastownhall/gascity c7eb6d2.
 
 ### Fixed
 
