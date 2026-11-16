@@ -7,6 +7,7 @@ on:
 
 env:
   BUF: github.com/bufbuild/buf/cmd/buf@v1.75.0
+  KUSTOMIZE_VERSION: v5.8.3
 
 jobs:
   go:
@@ -30,6 +31,11 @@ jobs:
           scripts/tuwunel-test.sh run "$bin" >> "$GITHUB_ENV"
           echo "ROOMCITY_TEST_REQUIRE_HOMESERVER=1" >> "$GITHUB_ENV"
       - run: make test
+      - name: Render the example's manifests
+        run: |
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F$KUSTOMIZE_VERSION/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" |
+            tar -xz -C "${RUNNER_TEMP:-/tmp}" kustomize
+          "${RUNNER_TEMP:-/tmp}/kustomize" build examples/minimal/k8s >/dev/null
       - name: Check that internal/gen is what proto/ generates
         run: |
           make generate

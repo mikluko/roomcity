@@ -1,0 +1,22 @@
+# The registration of the application service the city is to the homeserver.
+# Replace <as-token> and <hs-token> with two random strings (the same two go in
+# the Secret `matrix`, as as-token and hs-token) and example.org with the
+# homeserver's server name, then give the file to the homeserver.
+#
+# The user @sandbox:example.org makes the rooms and the space. Each agent has
+# the user @sandbox-<agent>:example.org, and the city's rooms have the aliases
+# #sandbox:example.org and #sandbox-<agent>:example.org. Both namespaces are
+# exclusive, so no person can take such a name.
+id: sandbox
+url: http://roomcity.roomcity-example.svc.cluster.local:8080
+sender_localpart: sandbox
+as_token: "<as-token>"
+hs_token: "<hs-token>"
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '^@sandbox(-[a-z0-9._=-]+)?:example\.org$'
+  aliases:
+    - exclusive: true
+      regex: '^#sandbox(-[a-z0-9._=-]+)?:example\.org$'

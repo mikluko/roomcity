@@ -1,0 +1,6 @@
+.*
+!.gitignore
+!.forgejo
+.gc/
+.beads/*
+hooks/

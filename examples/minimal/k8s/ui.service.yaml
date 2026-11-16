@@ -1,0 +1,13 @@
+# The transcripts page: the server's port, through the oauth2-proxy container
+# of the city's pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+spec:
+  selector:
+    app.kubernetes.io/name: roomcity
+  ports:
+    - name: auth
+      port: 4180
+      targetPort: oauth2

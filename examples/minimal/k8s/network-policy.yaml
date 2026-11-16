@@ -1,0 +1,34 @@
+# Who reaches the city's pod. The server's port is for the namespace's own
+# pods, the sessions', and the homeserver, which sends the application service
+# its events; the proxy's port is for the ingress controller alone. The
+# transcripts page is on loopback and needs no rule. The server checks the
+# token of each call as well: this is the second line.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: roomcity
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: roomcity
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: matrix
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: homeserver
+      ports:
+        - port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-controller
+      ports:
+        - port: 4180

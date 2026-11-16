@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `examples/minimal`: the configuration of a city as a minimal example of a deployment, with the names of the deployment it was taken from replaced by placeholders: the city's repository (`city/`), the manifests of its place in a Kubernetes cluster (`k8s/`), the registration of the application service as a template, and a README that says what must be there before it, what to replace and in which order. The tests load its `roomcity.toml` with the server's own loader and parse the city's files, and the test workflow renders the manifests.
+
 ## [0.3.3] - 2026-11-16
 
 ### Fixed

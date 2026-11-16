@@ -1,0 +1,33 @@
+[pack]
+name = "sandbox"
+schema = 2
+
+[imports.core]
+source = "https://github.com/gastownhall/gascity/tree/main/internal/bootstrap/packs/core"
+version = "sha:e38ce9cc55d15fa351199c042f0d07aba1a347af"
+
+[imports.bd]
+source = "https://github.com/gastownhall/gascity/tree/main/examples/bd"
+version = "sha:e38ce9cc55d15fa351199c042f0d07aba1a347af"
+
+[imports.roomcity]
+source = "https://sarak.sh/mikluko/roomcity.git"
+version = "^0.3"
+
+[[named_session]]
+template = "host"
+scope = "city"
+mode = "always"
+
+[[named_session]]
+template = "guest"
+scope = "city"
+mode = "always"
+
+[[patches.agent]]
+name = "bd.dog"
+max_active_sessions = 0
+
+[[patches.agent]]
+name = "core.control-dispatcher"
+max_active_sessions = 0

@@ -1,0 +1,50 @@
+[workspace]
+provider = "claude"
+
+[session]
+provider = "room"
+
+[providers.claude]
+base = "builtin:claude"
+prompt_mode = "none"
+accept_startup_dialogs = false
+option_defaults = { model = "claude-haiku-5-5" }
+
+[providers.goose]
+command = "goose"
+args = ["acp"]
+prompt_mode = "none"
+accept_startup_dialogs = false
+env = { GOOSE_PROVIDER = "openai", OPENAI_HOST = "https://api.kimi.com/coding", OPENAI_BASE_PATH = "v1/chat/completions", GOOSE_MODE = "smart_approve", GOOSE_MODEL = "kimi-for-coding" }
+
+[dolt]
+host = "dolt.dolt.svc.cluster.local"
+port = 3306
+
+[[orders.overrides]]
+name = "dolt-health"
+enabled = false
+
+[[orders.overrides]]
+name = "dolt-remotes-patrol"
+enabled = false
+
+[[orders.overrides]]
+name = "mol-dog-backup"
+enabled = false
+
+[[orders.overrides]]
+name = "mol-dog-compactor"
+enabled = false
+
+[[orders.overrides]]
+name = "mol-dog-doctor"
+enabled = false
+
+[[orders.overrides]]
+name = "mol-dog-phantom-db"
+enabled = false
+
+[[orders.overrides]]
+name = "mol-dog-stale-db"
+enabled = false

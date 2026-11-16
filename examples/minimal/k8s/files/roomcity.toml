@@ -1,0 +1,75 @@
+# The server's configuration: where it keeps its data and finds the city, how a
+# session's Job is made, and how the city is known to the homeserver.
+[server]
+data = "/home/city/roomcity"
+city_dir = "/home/city/city"
+# What a session's pod reaches the server at.
+url = "http://roomcity.roomcity-example.svc.cluster.local:8080"
+
+# An agent's own secrets are mounted in its sessions' pods only: Claude Code's
+# token for host and worker, Kimi's key for guest. `env` names the variable the
+# host sets for the agent from the file.
+[agents.host]
+always_on = true
+
+[[agents.host.secrets]]
+name = "claude"
+key = "token"
+mount_path = "/run/roomcity/secrets/claude/token"
+env = "CLAUDE_CODE_OAUTH_TOKEN"
+
+[agents.guest]
+always_on = true
+
+[[agents.guest.secrets]]
+name = "kimi"
+key = "api-key"
+mount_path = "/run/roomcity/secrets/kimi/api-key"
+env = "OPENAI_API_KEY"
+
+[agents.worker]
+always_on = false
+
+[[agents.worker.secrets]]
+name = "claude"
+key = "token"
+mount_path = "/run/roomcity/secrets/claude/token"
+env = "CLAUDE_CODE_OAUTH_TOKEN"
+
+[kube]
+namespace = "roomcity-example"
+# The image of the server itself runs the session's host.
+image = "sarak.sh/mikluko/roomcity:0.3.3"
+run_as_user = 1000
+cpu_request = "250m"
+memory_request = "512Mi"
+# A node_selector and tolerations, tables of their own, put the sessions on the
+# nodes the city's pod runs on when the cluster needs it.
+
+# Every session's pod: bd's credentials for the city's Dolt user, outside the
+# home, which bd finds through its own variable.
+[[kube.secrets]]
+name = "dolt"
+key = "credentials"
+mount_path = "/run/roomcity/secrets/dolt/credentials"
+path_env = "BEADS_CREDENTIALS_FILE"
+
+# The owner's role: the accounts and the application that hold it.
+[chat]
+name = "sandbox"
+transcripts = "https://city.example.org/-/"
+
+[[chat.holders]]
+id = "@owner:example.org"
+role = "owner"
+
+[[chat.holders]]
+id = "@owner-app:example.org"
+role = "owner"
+
+[matrix]
+homeserver = "http://homeserver.matrix.svc.cluster.local:8008"
+server_name = "example.org"
+city = "sandbox"
+as_token_file = "/run/roomcity/secrets/matrix/as-token"
+hs_token_file = "/run/roomcity/secrets/matrix/hs-token"

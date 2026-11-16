@@ -1,0 +1,178 @@
+# The city's pod: the gc supervisor of the city, the runtime's server and the
+# proxy of the transcripts page side by side, the volume holding the checkout of
+# the city's repository, gc's state and the server's database.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: roomcity
+spec:
+  # One city, one supervisor: the volume is written by one pod.
+  replicas: 1
+  serviceName: roomcity
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roomcity
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: roomcity
+    spec:
+      serviceAccountName: roomcity
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gc
+          image: sarak.sh/mikluko/roomcity:0.3.3
+          command: [dumb-init, --, sh, /opt/roomcity/start.sh]
+          env:
+            - name: CITY_NAME
+              value: sandbox
+            - name: CITY_BRANCH
+              value: main
+            # The city's repository, which the Secret forgejo can read.
+            - name: CITY_REPOSITORY
+              value: https://git.example.org/example/city.git
+            # The host of [dolt] in the city's city.toml, and the city's user
+            # and database on that Dolt.
+            - name: CITY_DOLT_HOST
+              value: dolt.dolt.svc.cluster.local
+            - name: CITY_DOLT_PORT
+              value: "3306"
+            - name: CITY_DOLT_USER
+              value: city
+            - name: CITY_DOLT_DATABASE
+              value: sandbox
+            # Where the supervisor's runtime command reaches the server: the
+            # server's loopback listener for gc alone, in this pod.
+            - name: ROOMCITY_RUNTIME_URL
+              value: http://127.0.0.1:8082
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: state
+              mountPath: /home/city
+            - name: scripts
+              mountPath: /opt/roomcity
+              readOnly: true
+            - name: forgejo
+              mountPath: /run/roomcity/secrets/forgejo
+              readOnly: true
+            - name: dolt
+              mountPath: /run/roomcity/secrets/dolt
+              readOnly: true
+        - name: roomcity
+          image: sarak.sh/mikluko/roomcity:0.3.3
+          command: [dumb-init, --, roomcity, server]
+          env:
+            - name: ROOMCITY_CONFIG
+              value: /etc/roomcity/roomcity.toml
+          ports:
+            - name: server
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: state
+              mountPath: /home/city
+            # The server runs the real gc for the sessions, in this pod, with
+            # the account the gc container sets up in the shared home: its git
+            # and bd read these two secrets at the same paths.
+            - name: forgejo
+              mountPath: /run/roomcity/secrets/forgejo
+              readOnly: true
+            - name: dolt
+              mountPath: /run/roomcity/secrets/dolt
+              readOnly: true
+            - name: config
+              mountPath: /etc/roomcity
+              readOnly: true
+            - name: matrix
+              mountPath: /run/roomcity/secrets/matrix
+              readOnly: true
+        # The transcripts page behind an OIDC provider: oauth2-proxy in front of
+        # the server's loopback listener, :8081, which is the page's only way
+        # in, the pod's containers sharing a network namespace. The proxy lets
+        # in the members of the group admin alone. The client's ID is public;
+        # its secret and the cookie secret are in the Secret oauth2-proxy. The
+        # image has no shell, so it runs its own entrypoint.
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+          args:
+            - --http-address=0.0.0.0:4180
+            - --provider=oidc
+            - --oidc-issuer-url=https://id.example.org
+            - --scope=openid email profile groups
+            - --allowed-group=admin
+            - --email-domain=*
+            - --reverse-proxy=true
+            - --skip-provider-button=true
+            - --silence-ping-logging=true
+            - --upstream=http://127.0.0.1:8081/
+            - --redirect-url=https://city.example.org/oauth2/callback
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              value: 00000000-0000-0000-0000-000000000000
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: oauth2-proxy, key: client-secret}
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef: {name: oauth2-proxy, key: cookie-secret}
+          ports:
+            - name: oauth2
+              containerPort: 4180
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: config
+          configMap:
+            name: roomcity-config
+        - name: scripts
+          configMap:
+            name: roomcity-scripts
+            defaultMode: 0555
+        - name: forgejo
+          secret:
+            secretName: forgejo
+        - name: dolt
+          secret:
+            secretName: dolt
+        - name: matrix
+          secret:
+            secretName: matrix
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+      spec:
+        accessModes: [ReadWriteOnce]
+        # Any class that gives a volume the pod's user (1000) can write; the
+        # sessions' Jobs have no volume of their own.
+        # storageClassName: standard
+        resources:
+          requests:
+            storage: 20Gi

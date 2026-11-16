@@ -1,0 +1,26 @@
+# The city's place in a cluster: the pod of gc's supervisor, the server and the
+# page's proxy, the rights the server needs for the sessions' Jobs, the Services,
+# the Ingress and the NetworkPolicy. The Secrets are not here: README.md names
+# them and says how they are made.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: roomcity-example
+
+resources:
+  - namespace.yaml
+  - service-account.yaml
+  - role.yaml
+  - service.yaml
+  - statefulset.yaml
+  - ui.service.yaml
+  - ui.ingress.yaml
+  - network-policy.yaml
+
+configMapGenerator:
+  - name: roomcity-scripts
+    files:
+      - files/start.sh
+  - name: roomcity-config
+    files:
+      - files/roomcity.toml

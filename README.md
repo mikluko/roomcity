@@ -41,6 +41,10 @@ It carries `roomcity`, `gc`, `bd`, `dolt`, `git`, Claude Code and goose, and run
 
 The `Dockerfile` pins every version.
 
+## An example
+
+`examples/minimal` holds the configuration of a city as a minimal example of a deployment: the city's repository, the manifests of its place in a Kubernetes cluster and the registration for the homeserver. Its README says what must be there before it and what to replace.
+
 ## Develop
 
 Go 1.27.4 or later and [buf](https://buf.build/docs/cli/installation/) are required.

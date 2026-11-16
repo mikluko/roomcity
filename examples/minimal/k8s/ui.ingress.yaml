@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ui
+  annotations:
+    # What the cluster needs for a certificate and a DNS record, if it
+    # makes them from the Ingress: cert-manager.io/cluster-issuer, external-dns.
+spec:
+  ingressClassName: example
+  tls:
+    - hosts:
+        - city.example.org
+      secretName: city-ui-tls
+  rules:
+    - host: city.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  name: auth

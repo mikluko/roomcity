@@ -1,0 +1,28 @@
+# The server's right over the sessions' Jobs and pods, in the namespace of the
+# city and nowhere else: a Role, not a ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: roomcity
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete, get, list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, delete, get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: roomcity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: roomcity
+subjects:
+  - kind: ServiceAccount
+    name: roomcity
