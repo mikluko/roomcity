@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"connectrpc.com/connect"
+	"github.com/afrase/acp-go/steering"
 	acp "github.com/afrase/acp-go/unstable"
 
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
@@ -16,6 +17,12 @@ import (
 // connection that is lost is opened again, naming the last instruction
 // taken.
 func (h *host) attach(ctx context.Context) {
+	reported := make(chan struct{})
+	go func() {
+		defer close(reported)
+		h.reportHandled(ctx)
+	}()
+	defer func() { <-reported }()
 	for ctx.Err() == nil {
 		h.mu.Lock()
 		last := h.lastSeq
@@ -55,7 +62,7 @@ func (h *host) take(ctx context.Context, in *roomcityv1.AttachResponse) {
 
 	switch i := in.Instruction.(type) {
 	case *roomcityv1.AttachResponse_Prompt:
-		h.prompt(ctx, i.Prompt.GetText(), i.Prompt.GetSource())
+		h.prompt(ctx, in.Seq, i.Prompt)
 	case *roomcityv1.AttachResponse_Cancel:
 		h.cancel(ctx)
 	case *roomcityv1.AttachResponse_PermissionAnswer:
@@ -69,18 +76,24 @@ func (h *host) take(ctx context.Context, in *roomcityv1.AttachResponse) {
 
 // queued is a prompt waiting for its turn.
 type queued struct {
+	seq    uint64 // the instruction's
 	text   string
 	source roomcityv1.PromptSource
 }
 
-// prompt queues text as a turn; the turns run one at a time. A prompt the
-// owner wrote goes ahead of those gc sent that are still waiting, behind the
-// owner's own, in the order they came.
-func (h *host) prompt(ctx context.Context, text string, source roomcityv1.PromptSource) {
+// prompt takes a prompt in. One that asks to go into the running turn does,
+// if a turn runs and the agent takes a message into it: that is steering. Any
+// other is queued as a turn; the turns run one at a time. A prompt the owner
+// wrote goes ahead of those gc sent that are still waiting, behind the
+// owner's own, in the order they came. What became of it is reported.
+func (h *host) prompt(ctx context.Context, seq uint64, p *roomcityv1.Prompt) {
+	if p.GetIntoTurn() && h.steered(ctx, seq, p.GetText()) {
+		return
+	}
 	h.mu.Lock()
-	q := queued{text, source}
+	q := queued{seq, p.GetText(), p.GetSource()}
 	at := len(h.prompts)
-	if source == roomcityv1.PromptSource_PROMPT_SOURCE_OWNER {
+	if q.source == roomcityv1.PromptSource_PROMPT_SOURCE_OWNER {
 		for at > 0 && h.prompts[at-1].source != roomcityv1.PromptSource_PROMPT_SOURCE_OWNER {
 			at--
 		}
@@ -91,7 +104,32 @@ func (h *host) prompt(ctx context.Context, text string, source roomcityv1.Prompt
 	h.mu.Unlock()
 	if start {
 		go h.turns(ctx)
+		return
 	}
+	h.handled(seq, roomcityv1.Handling_HANDLING_QUEUED)
+}
+
+// steered puts text into the running turn and reports so, and says whether it
+// did. It does not when no turn runs, when the agent does not advertise
+// steering, or when the agent answers that it has no turn to take it.
+func (h *host) steered(ctx context.Context, seq uint64, text string) bool {
+	h.mu.Lock()
+	can := h.steering && h.turning
+	sid := h.sid
+	h.mu.Unlock()
+	if !can {
+		return false
+	}
+	outcome, err := steering.Steer(ctx, h.conn, string(sid), []acp.ContentBlock{{Text: &acp.TextContent{Text: text}}})
+	if err != nil {
+		h.log.Warn("steering the turn failed; the prompt waits for its turn", "err", err)
+		return false
+	}
+	if outcome != steering.Injected {
+		return false
+	}
+	h.handled(seq, roomcityv1.Handling_HANDLING_STEERED)
+	return true
 }
 
 // turns runs the queued prompts until none is left.
@@ -104,9 +142,11 @@ func (h *host) turns(ctx context.Context) {
 			return
 		}
 		text := h.prompts[0].text
+		seq := h.prompts[0].seq
 		h.prompts = h.prompts[1:]
 		sid := h.sid
 		h.mu.Unlock()
+		h.handled(seq, roomcityv1.Handling_HANDLING_STARTED)
 
 		_, err := h.conn.Prompt(ctx, &acp.PromptRequest{
 			SessionID: sid,

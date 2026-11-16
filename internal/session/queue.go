@@ -204,8 +204,7 @@ func (r *Registry) queueControl(ctx context.Context, f func(*sql.Tx) error) erro
 }
 
 // Instructions streams the session's instructions with a number greater
-// than after, then those queued later. A prompt is recorded as Delivered
-// when it is handed to the receiver for the first time. The channel is
+// than after, then those queued later. The channel is
 // closed when ctx ends, and when the session ends or is started afresh,
 // once what was queued before is sent: a host of an earlier start is not
 // handed the next one's instructions.
@@ -286,14 +285,57 @@ func (r *Registry) markSent(ctx context.Context, name string, p pendingInstructi
 	if p.sent {
 		return nil
 	}
+	err := r.queueControl(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE instructions SET sent = 1 WHERE session = ? AND seq = ?`, name, p.Seq)
+		return err
+	})
+	return err
+}
+
+// Handling is what the session host did with a prompt it was handed.
+type Handling int
+
+const (
+	// Steered is a prompt that went into the turn that was running.
+	Steered Handling = iota + 1
+	// BeganTurn is a prompt that began a turn of its own.
+	BeganTurn
+	// Queued is a prompt that waits for the running turn's end.
+	Queued
+)
+
+// Handled records what the host did with the prompt instruction of that
+// number: Steered and BeganTurn make it Delivered, Queued makes it Waiting. A
+// prompt is Delivered once and is not Waiting after it, so a report that
+// comes again, or late, changes nothing. A number that names no prompt is
+// ErrNotFound.
+func (r *Registry) Handled(ctx context.Context, name string, instruction uint64, h Handling) error {
 	err := r.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE instructions SET sent = 1 WHERE session = ? AND seq = ?`, name, p.Seq); err != nil {
+		var kind InstructionKind
+		var source Source
+		var text string
+		var of uint64
+		err := tx.QueryRow(`SELECT kind, source, text, event_seq FROM instructions WHERE session = ? AND seq = ?`, name, instruction).
+			Scan(&kind, &source, &text, &of)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && kind != InstructionPrompt {
+			return ErrNotFound
+		}
+		if err != nil {
 			return err
 		}
-		if p.Kind != InstructionPrompt {
+		state := Delivered
+		if h == Queued {
+			state = Waiting
+		}
+		var seen int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE session = ? AND kind = ? AND of = ? AND pstate IN (?, ?)`,
+			name, eventPrompt, of, Delivered, state).Scan(&seen); err != nil {
+			return err
+		}
+		if seen > 0 {
 			return nil
 		}
-		_, err := r.appendEvent(tx, name, Prompt{Source: p.Source, Text: p.Text, State: Delivered, Of: p.eventSeq})
+		_, err = r.appendEvent(tx, name, Prompt{Source: source, Text: text, State: state, Of: of})
 		return err
 	})
 	if err == nil {

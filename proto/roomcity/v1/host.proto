@@ -20,6 +20,9 @@ service HostService {
   // side: a manifest, then the files, as a tar stream. The host asks once,
   // before it starts the agent.
   rpc Stage(StageRequest) returns (stream StageResponse);
+  // Handled tells the server what the host did with a prompt it was handed,
+  // so that the room can show a prompt that waits for the running turn's end.
+  rpc Handled(HandledRequest) returns (HandledResponse);
 }
 
 message AttachRequest {
@@ -44,6 +47,11 @@ message AttachResponse {
 message Prompt {
   string text = 1;
   PromptSource source = 2;
+  // into_turn asks the host to put the text into the running turn, where one
+  // runs and the agent takes a message into it, and else to treat it as the
+  // next turn's prompt. The server sets it for the owner's prompts and never
+  // for gc's, which wait for the turn's end.
+  bool into_turn = 3;
 }
 
 enum PromptSource {
@@ -64,6 +72,27 @@ message PermissionAnswer {
   // The id of the option chosen among those the request offered. Empty
   // means the request is cancelled.
   string option_id = 2;
+}
+
+message HandledRequest {
+  string session = 1;
+  // The seq of the prompt instruction.
+  uint64 instruction_seq = 2;
+  Handling handling = 3;
+}
+
+message HandledResponse {}
+
+// Handling is what became of a prompt in the host.
+enum Handling {
+  HANDLING_UNSPECIFIED = 0;
+  // The agent took the text into the turn that was running.
+  HANDLING_STEERED = 1;
+  // The text began a turn of its own.
+  HANDLING_STARTED = 2;
+  // A turn is running that the text cannot join, so it waits for the turn's
+  // end; HANDLING_STARTED follows when its turn begins.
+  HANDLING_QUEUED = 3;
 }
 
 // Stop ends the agent and the host with it.

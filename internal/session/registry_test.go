@@ -240,7 +240,62 @@ func TestNudgeSurvivesARestartBeforeItIsDelivered(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, session.Lifecycle{Seq: 1, Kind: session.Started}, recv(t, evs))
 	require.Equal(t, session.Prompt{Seq: stored, Source: session.FromGC, Text: "wake up", State: session.Stored}, recv(t, evs))
+
+	// Being handed to the host is not being delivered: the host says what it did.
+	require.NoError(t, r.Handled(ctx, "s", 1, session.BeganTurn))
 	require.Equal(t, session.Prompt{Seq: 3, Source: session.FromGC, Text: "wake up", State: session.Delivered, Of: stored}, recv(t, evs))
+}
+
+func TestHandledMakesAPromptWaitingOrDeliveredOnce(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	stored, err := r.Prompt(ctx, "s", session.PromptInput{Text: "steer"})
+	require.NoError(t, err)
+	evs, err := r.Subscribe(ctx, "s", session.FromNow)
+	require.NoError(t, err)
+
+	require.NoError(t, r.Handled(ctx, "s", 1, session.Queued))
+	require.NoError(t, r.Handled(ctx, "s", 1, session.Queued), "a report that comes again changes nothing")
+	require.Equal(t, session.Prompt{Seq: stored + 1, Source: session.FromOwner, Text: "steer", State: session.Waiting, Of: stored}, recv(t, evs))
+
+	require.NoError(t, r.Handled(ctx, "s", 1, session.BeganTurn))
+	require.NoError(t, r.Handled(ctx, "s", 1, session.Steered), "nor does a second delivery")
+	require.NoError(t, r.Handled(ctx, "s", 1, session.Queued), "nor a late report that it waits")
+	require.Equal(t, session.Prompt{Seq: stored + 2, Source: session.FromOwner, Text: "steer", State: session.Delivered, Of: stored}, recv(t, evs))
+
+	select {
+	case ev := <-evs:
+		t.Fatalf("an event nothing asked for: %#v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestHandledAPromptThatWentAtOnceHasNoWaitingRecord(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	stored, err := r.Prompt(ctx, "s", session.PromptInput{Text: "now"})
+	require.NoError(t, err)
+	evs, err := r.Subscribe(ctx, "s", session.FromNow)
+	require.NoError(t, err)
+
+	require.NoError(t, r.Handled(ctx, "s", 1, session.Steered))
+	require.Equal(t, session.Prompt{Seq: stored + 1, Source: session.FromOwner, Text: "now", State: session.Delivered, Of: stored}, recv(t, evs))
+}
+
+func TestHandledNamesAPromptOrIsNotFound(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	err = r.Cancel(ctx, "s")
+	require.NoError(t, err)
+
+	require.ErrorIs(t, r.Handled(ctx, "s", 9, session.Steered), session.ErrNotFound, "no such instruction")
+	require.ErrorIs(t, r.Handled(ctx, "s", 1, session.Steered), session.ErrNotFound, "a cancel is no prompt")
 }
 
 func TestAttachAgainReceivesOnlyTheInstructionsAfterTheLastCarried(t *testing.T) {

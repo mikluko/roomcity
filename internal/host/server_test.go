@@ -35,6 +35,14 @@ type fakeServer struct {
 	manifest    *roomcityv1.StageManifest
 	archive     []byte
 	stages      int // Stage calls
+	handled     []handledCall
+	failHandled int // Handled calls to fail, from the first
+}
+
+// handledCall is a Handled call of the host.
+type handledCall struct {
+	Seq      uint64
+	Handling roomcityv1.Handling
 }
 
 func newFakeServer(t *testing.T) (*fakeServer, string) {
@@ -67,6 +75,28 @@ func (s *fakeServer) drop() {
 	defer s.mu.Unlock()
 	s.drops++
 	s.notify()
+}
+
+// handlings returns what the host has told the server of its prompts.
+func (s *fakeServer) handlings() []handledCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]handledCall(nil), s.handled...)
+}
+
+func (s *fakeServer) Handled(_ context.Context, req *connect.Request[roomcityv1.HandledRequest]) (*connect.Response[roomcityv1.HandledResponse], error) {
+	if sessionauth.Token(req.Header()) != testToken {
+		return nil, connect.NewError(connect.CodeUnauthenticated, nil)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failHandled > 0 {
+		s.failHandled--
+		return nil, connect.NewError(connect.CodeUnavailable, nil)
+	}
+	s.handled = append(s.handled, handledCall{req.Msg.InstructionSeq, req.Msg.Handling})
+	s.notify()
+	return connect.NewResponse(&roomcityv1.HandledResponse{}), nil
 }
 
 func (s *fakeServer) failNextReports(n int) {

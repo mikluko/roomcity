@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/afrase/acp-go/steering"
 	acp "github.com/afrase/acp-go/unstable"
 
 	"sarak.sh/mikluko/claudeacp/claudeacp"
@@ -122,6 +123,13 @@ type host struct {
 	conn    *acp.AgentConn
 	prompts []queued
 	turning bool
+	// steering is whether the agent said, in its initialize answer, that it
+	// takes a message into a running turn.
+	steering bool
+	// reports are what the server has not yet been told of a prompt, in the
+	// order they happened, and wake says there is one.
+	reports []handledReport
+	wake    chan struct{}
 	pending map[string]chan string // permission requests by their id
 	endHost context.CancelFunc
 	// fatalErr is what ended the host when it was not a stop.
@@ -149,6 +157,7 @@ func newHost(cfg Config) *host {
 		rec:     newRecorder(cfg.Now),
 		client:  roomcityv1connect.NewHostServiceClient(httpClient, cfg.Server, sessionauth.Client(cfg.Token)),
 		pending: map[string]chan string{},
+		wake:    make(chan struct{}, 1),
 	}
 }
 
@@ -233,9 +242,13 @@ func (h *host) fatal(err error) {
 
 // session starts the agent's session: initialize, then session/new.
 func (h *host) session(ctx context.Context) error {
-	if _, err := h.conn.Initialize(ctx, &acp.InitializeRequest{ProtocolVersion: acp.LatestProtocolVersion, ClientCapabilities: &acp.ClientCapabilities{}}); err != nil {
+	hello, err := h.conn.Initialize(ctx, &acp.InitializeRequest{ProtocolVersion: acp.LatestProtocolVersion, ClientCapabilities: &acp.ClientCapabilities{}})
+	if err != nil {
 		return fmt.Errorf("host: initialize: %w", err)
 	}
+	h.mu.Lock()
+	h.steering = steering.Supported(hello.Meta)
+	h.mu.Unlock()
 	res, err := h.conn.NewSession(ctx, &acp.NewSessionRequest{Cwd: h.cfg.WorkDir, MCPServers: []acp.MCPServer{}})
 	if err != nil {
 		return fmt.Errorf("host: new session: %w", err)

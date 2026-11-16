@@ -83,3 +83,56 @@ func (h *host) flush() {
 		}
 	}
 }
+
+// handledReport is what the server is to be told of a prompt.
+type handledReport struct {
+	seq      uint64
+	handling roomcityv1.Handling
+}
+
+// handled queues the report of what the host did with a prompt. It is sent in
+// the background, in the order the reports were made, and again after a
+// failure or a lost connection: the server takes a report twice as once.
+func (h *host) handled(seq uint64, handling roomcityv1.Handling) {
+	h.mu.Lock()
+	h.reports = append(h.reports, handledReport{seq, handling})
+	h.mu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+// reportHandled sends the reports until ctx ends. A report the server cannot
+// place, because the instruction is not its own, is dropped.
+func (h *host) reportHandled(ctx context.Context) {
+	for {
+		h.mu.Lock()
+		var next *handledReport
+		if len(h.reports) > 0 {
+			next = &h.reports[0]
+		}
+		h.mu.Unlock()
+		if next == nil {
+			select {
+			case <-h.wake:
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+		_, err := h.client.Handled(ctx, connect.NewRequest(&roomcityv1.HandledRequest{
+			Session: h.cfg.Session, InstructionSeq: next.seq, Handling: next.handling,
+		}))
+		if err != nil && ctx.Err() == nil && connect.CodeOf(err) != connect.CodeNotFound {
+			h.log.Warn("telling the server what became of a prompt failed; trying again", "err", err)
+			if !wait(ctx, h.cfg.Retry) {
+				return
+			}
+			continue
+		}
+		h.mu.Lock()
+		h.reports = h.reports[1:]
+		h.mu.Unlock()
+	}
+}

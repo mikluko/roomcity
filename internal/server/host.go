@@ -74,7 +74,11 @@ func instruction(i session.Instruction) *roomcityv1.AttachResponse {
 		if i.Source == session.FromGC {
 			src = roomcityv1.PromptSource_PROMPT_SOURCE_GC
 		}
-		out.Instruction = &roomcityv1.AttachResponse_Prompt{Prompt: &roomcityv1.Prompt{Text: i.Text, Source: src}}
+		out.Instruction = &roomcityv1.AttachResponse_Prompt{Prompt: &roomcityv1.Prompt{
+			Text:     i.Text,
+			Source:   src,
+			IntoTurn: i.Source != session.FromGC,
+		}}
 	case session.InstructionCancel:
 		out.Instruction = &roomcityv1.AttachResponse_Cancel{Cancel: &roomcityv1.Cancel{}}
 	case session.InstructionPermissionAnswer:
@@ -108,6 +112,28 @@ func (h *Host) Report(ctx context.Context, req *connect.Request[roomcityv1.Repor
 		return nil, fail(err)
 	}
 	return connect.NewResponse(&roomcityv1.ReportResponse{LastSeq: last}), nil
+}
+
+// Handled records what the host did with a prompt it was handed.
+func (h *Host) Handled(ctx context.Context, req *connect.Request[roomcityv1.HandledRequest]) (*connect.Response[roomcityv1.HandledResponse], error) {
+	if err := h.authorize(req.Msg.Session, req.Header()); err != nil {
+		return nil, err
+	}
+	var handling session.Handling
+	switch req.Msg.Handling {
+	case roomcityv1.Handling_HANDLING_STEERED:
+		handling = session.Steered
+	case roomcityv1.Handling_HANDLING_STARTED:
+		handling = session.BeganTurn
+	case roomcityv1.Handling_HANDLING_QUEUED:
+		handling = session.Queued
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("the handling is not one the server knows"))
+	}
+	if err := h.Registry.Handled(ctx, req.Msg.Session, req.Msg.InstructionSeq, handling); err != nil {
+		return nil, fail(err)
+	}
+	return connect.NewResponse(&roomcityv1.HandledResponse{}), nil
 }
 
 // Stage sends the bundle of the session's start: the manifest, then the
