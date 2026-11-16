@@ -32,10 +32,12 @@ three containers:
   serves on a loopback port of its own.
 
 Besides them: the ServiceAccount and the Role that lets the server create and
-delete Jobs and pods in its namespace and nowhere else, the Service that
-sessions and the homeserver reach the server at, the Service and the Ingress of
-the page, and a NetworkPolicy that lets only the namespace's pods and the
-homeserver reach the server, and only the ingress controller reach the proxy.
+delete Jobs and pods in its namespace and nowhere else, read a pod's log, and
+create, update and delete Secrets, which hold each session's environment, but
+read none; the Service that sessions and the homeserver reach the server at, the
+Service and the Ingress of the page, and a NetworkPolicy that lets only the
+namespace's pods and the homeserver reach the server, and only the ingress
+controller reach the proxy.
 
 ## What must be there before it
 

@@ -45,6 +45,24 @@ The `Dockerfile` pins every version.
 
 `examples/minimal` holds the configuration of a city as a minimal example of a deployment: the city's repository, the manifests of its place in a Kubernetes cluster and the registration for the homeserver. Its README says what must be there before it and what to replace.
 
+## What a session's pod is given
+
+A session is a Kubernetes Job of one pod in the server's namespace.
+Its environment is what gc set for the agent (the supervisor's variables and those of `city.toml`'s workspace, provider and agent), less what a pod has of its own (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `PWD`, `OLDPWD`, `TMPDIR`, `HOSTNAME`, `TERM`, the locale (`LANG`, `LANGUAGE`, `LC_*`), `XDG_*`, `KUBERNETES_*`) and the two names of the Dolt password gc sets (`GC_DOLT_PASSWORD`, `BEADS_DOLT_PASSWORD`; bd reads its credentials from the file `BEADS_CREDENTIALS_FILE` names), plus the server's own `ROOMCITY_*`, among them the session's token.
+
+None of that is written into the Job's spec, which whoever may read Jobs can read.
+The server makes a Secret for each session, named like its Job, which holds every one of those variables; the pod reads it with `envFrom`, the Job owns it, and deleting the Job, as stopping the session does, removes it.
+The Secrets of the namespace that `roomcity.toml` lists (`[kube] secrets`, `[agents.<name>] secrets`) are mounted as files, and a file's path may be handed to the pod as a variable (`path_env`, `env`); a credential that is not in gc's environment reaches a pod that way.
+
+Who can read a session's Secret: whoever may read Secrets in the namespace, which the server's Role grants it to make (create, update and delete on `secrets`: it cannot read or list them).
+A server that lacks the right fails the start and says so; it does not fall back to a plain environment.
+So an API key put in `city.toml`'s `env` reaches the pod and is readable by the namespace's readers of Secrets, and not by its readers of Jobs.
+
+Two limits, from the server's not being able to read or list Secrets:
+
+- A server that dies between making a session's Secret and making its Job leaves a Secret that nothing owns. The server cannot list Secrets to find it; the next start of the same session overwrites it and a stop of that name deletes it, and otherwise it stays until someone deletes it.
+- Starts of one name are serialized by the server and only the server makes a session's Job, so a Job that appears between the start's check for one and its own creation, made by hand, would find its Secret overwritten.
+
 ## Develop
 
 Go 1.27.4 or later and [buf](https://buf.build/docs/cli/installation/) are required.

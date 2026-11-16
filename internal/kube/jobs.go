@@ -10,7 +10,6 @@ import (
 	"path"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -198,26 +197,81 @@ func jobName(session string) string { return "roomcity-" + id(session) }
 
 // Create makes the session's Job, which runs the session host once.
 func (j *Jobs) Create(ctx context.Context, spec operate.JobSpec) error {
-	_, err := j.client.BatchV1().Jobs(j.cfg.Namespace).Create(ctx, j.job(spec), metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
+	// A Job of the name holds the Secret of its pod: it is neither
+	// overwritten nor removed by a start that finds the Job there.
+	if _, err := j.client.BatchV1().Jobs(j.cfg.Namespace).Get(ctx, jobName(spec.Session), metav1.GetOptions{}); err == nil {
 		return fmt.Errorf("a Job of session %s exists", spec.Session)
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+	secret, err := j.putEnvSecret(ctx, spec)
+	if err != nil {
+		return err
+	}
+	job, err := j.client.BatchV1().Jobs(j.cfg.Namespace).Create(ctx, j.job(spec), metav1.CreateOptions{})
+	if err != nil {
+		_ = j.deleteEnvSecret(ctx, spec.Session)
+		if apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("a Job of session %s exists", spec.Session)
+		}
+		return err
+	}
+	// The Job owns the Secret, so that the cluster removes it with the Job
+	// should the server not.
+	secret.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID}}
+	if _, err := j.client.CoreV1().Secrets(j.cfg.Namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		_ = j.Delete(ctx, spec.Session)
+		return fmt.Errorf("making the Job own the Secret of session %s: %w", spec.Session, err)
+	}
+	return nil
+}
+
+// putEnvSecret makes the Secret that holds the environment of the session's
+// pod: every variable gc gave and the server's own, ROOMCITY_TOKEN among
+// them, none of which the Job's spec carries, since the spec is readable to
+// whoever may read Jobs. The pod reads it with envFrom.
+func (j *Jobs) putEnvSecret(ctx context.Context, spec operate.JobSpec) (*corev1.Secret, error) {
+	data := make(map[string][]byte, len(spec.Env))
+	for k, v := range spec.Env {
+		data[k] = []byte(v)
+	}
+	s := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName(spec.Session),
+			Namespace: j.cfg.Namespace,
+			Labels:    map[string]string{labelManagedBy: managedBy, labelSession: id(spec.Session)},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: data,
+	}
+	secrets := j.client.CoreV1().Secrets(j.cfg.Namespace)
+	out, err := secrets.Create(ctx, s, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		// An earlier start's, which its Job's deletion has not taken yet.
+		out, err = secrets.Update(ctx, s, metav1.UpdateOptions{})
+	}
+	if apierrors.IsForbidden(err) {
+		return nil, fmt.Errorf("the server may not make Secrets in the namespace %s, which a session's environment needs (its Role: create, update and delete on secrets): %w", j.cfg.Namespace, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("making the Secret of session %s: %w", spec.Session, err)
+	}
+	return out, nil
+}
+
+func (j *Jobs) deleteEnvSecret(ctx context.Context, session string) error {
+	err := j.client.CoreV1().Secrets(j.cfg.Namespace).Delete(ctx, jobName(session), metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
 	}
 	return err
 }
 
 func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
-	names := make([]string, 0, len(spec.Env))
-	for k := range spec.Env {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	env := make([]corev1.EnvVar, 0, len(names)+1)
-	for _, k := range names {
-		if k != "PATH" {
-			env = append(env, corev1.EnvVar{Name: k, Value: spec.Env[k]})
-		}
-	}
-	env = append(env, corev1.EnvVar{Name: "PATH", Value: podPath})
+	// The container's own variables are what is no secret: PATH and the
+	// paths of the mounted files. The rest of spec.Env is in the session's
+	// Secret, which envFrom reads; a variable of env wins over it.
+	env := []corev1.EnvVar{{Name: "PATH", Value: podPath}}
 
 	mounts := []corev1.VolumeMount{{Name: "work", MountPath: spec.WorkDir}}
 	volumes := []corev1.Volume{{Name: "work", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
@@ -288,6 +342,7 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 						Command:      []string{"/usr/bin/dumb-init", "--", "/usr/local/bin/roomcity", "host"},
 						WorkingDir:   spec.WorkDir,
 						Env:          env,
+						EnvFrom:      []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: jobName(spec.Session)}}}},
 						VolumeMounts: mounts,
 						Resources:    corev1.ResourceRequirements{Requests: requests},
 						SecurityContext: &corev1.SecurityContext{
@@ -306,10 +361,10 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 func (j *Jobs) Delete(ctx context.Context, session string) error {
 	policy := metav1.DeletePropagationBackground
 	err := j.client.BatchV1().Jobs(j.cfg.Namespace).Delete(ctx, jobName(session), metav1.DeleteOptions{PropagationPolicy: &policy})
-	if apierrors.IsNotFound(err) {
-		return nil
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
-	return err
+	return j.deleteEnvSecret(ctx, session)
 }
 
 // Alive reports whether the session has a Job that has neither failed nor
@@ -406,7 +461,7 @@ func (j *Jobs) DeleteObject(ctx context.Context, session, id string) (bool, erro
 	case err != nil:
 		return false, err
 	}
-	return true, nil
+	return true, j.deleteEnvSecret(ctx, session)
 }
 
 // failureLogLines is how much of the end of a pod's log Failure reports.

@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `examples/minimal`: the configuration of a city as a minimal example of a deployment, with the names of the deployment it was taken from replaced by placeholders: the city's repository (`city/`), the manifests of its place in a Kubernetes cluster (`k8s/`), the registration of the application service as a template, and a README that says what must be there before it, what to replace and in which order. The tests load its `roomcity.toml` with the server's own loader and parse the city's files, and the test workflow renders the manifests.
 
+### Changed
+
+- `BEADS_DOLT_PASSWORD`, the second name gc sets the Dolt password under, is held back from a session's pod by its full name, as `GC_DOLT_PASSWORD` is: bd in the pod reads its credentials from the file `BEADS_CREDENTIALS_FILE` names.
+- The environment of a session's pod, `ROOMCITY_TOKEN` and the variables gc set for the agent, is in a Secret of the namespace that the server makes for the session, owned by its Job and removed with it, and no longer in the Job's spec, which whoever may read Jobs can read. The pod reads it with `envFrom`. The server's Role needs `create`, `update` and `delete` on `secrets` of the namespace (no `get`, no `list`: it can read none); without them a start fails with a message that says so, and the server does not fall back to a plain environment. The README says what the Secret holds and who can read it.
+
 ## [0.3.3] - 2026-11-16
 
 ### Fixed

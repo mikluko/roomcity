@@ -2,6 +2,9 @@ package kube_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"path"
 	"strings"
 	"testing"
@@ -9,9 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"sarak.sh/mikluko/roomcity/internal/kube"
 	"sarak.sh/mikluko/roomcity/internal/operate"
@@ -19,6 +26,13 @@ import (
 
 func newJobs() (*kube.Jobs, *fake.Clientset) {
 	c := fake.NewSimpleClientset()
+	// The cluster gives each Job a UID; the fake does not.
+	var made int
+	c.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		made++
+		action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).UID = types.UID(fmt.Sprintf("job-uid-%d", made))
+		return false, nil, nil
+	})
 	return kube.New(c, kube.Config{
 		Namespace: "sandbox",
 		Image:     "sarak.sh/mikluko/roomcity:0.2.0",
@@ -75,9 +89,9 @@ func TestCreateMakesAJobThatRunsTheHost(t *testing.T) {
 	ctr := pod.Containers[0]
 	require.Equal(t, []string{"/usr/bin/dumb-init", "--", "/usr/local/bin/roomcity", "host"}, ctr.Command)
 	require.Equal(t, "/city/.gc/agents/worker", ctr.WorkingDir)
-	require.Contains(t, ctr.Env, corev1.EnvVar{Name: "ROOMCITY_TOKEN", Value: "t"})
 	for _, e := range ctr.Env {
 		require.NotContains(t, e.Name, "SECRET", "a credential is a file, not a variable")
+		require.NotEqual(t, "t", e.Value, "the session's token is not in the spec")
 	}
 	require.Contains(t, mountPaths(pod), "/city/.gc/agents/worker")
 	require.Error(t, jobs.Create(ctx, operate.JobSpec{Session: "Worker_1"}), "a second Job of the same session")
@@ -338,4 +352,139 @@ func TestTheJobNeverMakesASecondPodForAFailedStart(t *testing.T) {
 	require.Nil(t, job.Spec.Parallelism, "one pod at a time")
 	require.Nil(t, job.Spec.Completions)
 	require.Nil(t, job.Spec.ActiveDeadlineSeconds)
+}
+
+func envSecret(t *testing.T, c *fake.Clientset, name string) (*corev1.Secret, bool) {
+	t.Helper()
+	list, err := c.CoreV1().Secrets("sandbox").List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	for i := range list.Items {
+		if list.Items[i].Name == name {
+			return &list.Items[i], true
+		}
+	}
+	return nil, false
+}
+
+func TestNoValueOfTheSessionsEnvironmentIsInTheJobsSpec(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{
+		Session: "guest-1", Agent: "guest", WorkDir: "/w",
+		Env: map[string]string{
+			"ROOMCITY_TOKEN": "tok-5ecret", "GOOSE_PROVIDER": "openai", "OPENAI_API_KEY": "sk-very-secret",
+			"GC_AGENT": "guest", "PATH": "/city/bin",
+		},
+	}))
+
+	list, err := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	spec, err := json.Marshal(list.Items[0])
+	require.NoError(t, err)
+	for _, value := range []string{"tok-5ecret", "sk-very-secret", "openai", "/city/bin"} {
+		require.NotContains(t, string(spec), value, "a value of gc's environment, or the server's token, is in the Job")
+	}
+
+	ctr := list.Items[0].Spec.Template.Spec.Containers[0]
+	require.Len(t, ctr.EnvFrom, 1)
+	ref := ctr.EnvFrom[0].SecretRef
+	require.NotNil(t, ref)
+	secret, ok := envSecret(t, c, ref.Name)
+	require.True(t, ok, "the Secret the pod reads is there")
+	require.Equal(t, map[string][]byte{
+		"ROOMCITY_TOKEN": []byte("tok-5ecret"), "GOOSE_PROVIDER": []byte("openai"), "OPENAI_API_KEY": []byte("sk-very-secret"),
+		"GC_AGENT": []byte("guest"), "PATH": []byte("/city/bin"),
+	}, secret.Data)
+	require.Equal(t, "roomcity", secret.Labels["app.kubernetes.io/managed-by"])
+
+	// What the container sets itself wins over the Secret: PATH is the pod's.
+	var path string
+	for _, e := range ctr.Env {
+		if e.Name == "PATH" {
+			path = e.Value
+		}
+	}
+	require.True(t, strings.HasPrefix(path, "/usr/local/lib/roomcity/bin:"), path)
+}
+
+func TestTheJobOwnsTheSecretAndTheyGoTogether(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", Agent: "worker", WorkDir: "/w", Env: map[string]string{"A": "1"}}))
+	name := jobName(t, c)
+	secret, ok := envSecret(t, c, name)
+	require.True(t, ok)
+	require.Len(t, secret.OwnerReferences, 1)
+	require.Equal(t, "Job", secret.OwnerReferences[0].Kind)
+	require.Equal(t, types.UID("job-uid-1"), secret.OwnerReferences[0].UID)
+
+	require.NoError(t, jobs.Delete(ctx, "w-1"))
+	_, ok = envSecret(t, c, name)
+	require.False(t, ok, "stop takes the Secret with the Job")
+	require.NoError(t, jobs.Delete(ctx, "w-1"), "and is idempotent")
+}
+
+func jobName(t *testing.T, c *fake.Clientset) string {
+	t.Helper()
+	list, err := c.BatchV1().Jobs("sandbox").List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	return list.Items[0].Name
+}
+
+func TestDeleteObjectTakesTheSecretToo(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", WorkDir: "/w", Env: map[string]string{"A": "1"}}))
+	name := jobName(t, c)
+	list, err := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	job := list.Items[0]
+	job.UID = "uid-1"
+	_, err = c.BatchV1().Jobs("sandbox").Update(ctx, &job, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	deleted, err := jobs.DeleteObject(ctx, "w-1", "uid-1")
+	require.NoError(t, err)
+	require.True(t, deleted)
+	_, ok := envSecret(t, c, name)
+	require.False(t, ok)
+}
+
+func TestAServerThatMayNotMakeSecretsFailsTheStartAndSaysWhy(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	c.PrependReactor("create", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "roomcity-w-1", errors.New("no"))
+	})
+	err := jobs.Create(ctx, operate.JobSpec{Session: "w-1", WorkDir: "/w", Env: map[string]string{"A": "1"}})
+	require.ErrorContains(t, err, "may not make Secrets in the namespace sandbox")
+	require.ErrorContains(t, err, "create, update and delete on secrets")
+	list, lerr := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, lerr)
+	require.Empty(t, list.Items, "no Job, and no fall back to a plain environment")
+}
+
+func TestAStartThatFindsTheSessionsJobLeavesItsSecretAlone(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", WorkDir: "/w", Env: map[string]string{"A": "first"}}))
+	name := jobName(t, c)
+
+	require.Error(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", WorkDir: "/w", Env: map[string]string{"A": "second"}}))
+	secret, ok := envSecret(t, c, name)
+	require.True(t, ok)
+	require.Equal(t, "first", string(secret.Data["A"]))
+}
+
+func TestAJobThatCannotBeMadeLeavesNoSecret(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	c.PrependReactor("create", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("the cluster is down")
+	})
+	require.Error(t, jobs.Create(ctx, operate.JobSpec{Session: "w-1", WorkDir: "/w", Env: map[string]string{"A": "1"}}))
+	list, err := c.CoreV1().Secrets("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Empty(t, list.Items)
 }

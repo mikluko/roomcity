@@ -834,7 +834,7 @@ func TestAProvidersEnvironmentReachesThePodAndWhatThePodHasOfItsOwnDoesNot(t *te
 		// gc asking for a variable to be unset, a name that is no variable, and the server's own.
 		"GC_CONTROLLER_TOKEN": "", "not a name": "x", "ROOMCITY_TOKEN": "forged", "ROOMCITY_RUNTIME_URL": "http://127.0.0.1:8082",
 		// A known secret.
-		"GC_DOLT_PASSWORD": "hunter2",
+		"GC_DOLT_PASSWORD": "hunter2", "BEADS_DOLT_PASSWORD": "hunter2-beads",
 	}})
 	f.jobs.onCreate = func(spec operate.JobSpec) {
 		go func() {
@@ -856,12 +856,13 @@ func TestAProvidersEnvironmentReachesThePodAndWhatThePodHasOfItsOwnDoesNot(t *te
 	} {
 		require.Equal(t, v, env[k], k)
 	}
-	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "TMPDIR", "XDG_RUNTIME_DIR", "KUBERNETES_SERVICE_HOST", "HOSTNAME", "TERM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "GC_CONTROLLER_TOKEN", "not a name", "ROOMCITY_RUNTIME_URL", "GC_DOLT_PASSWORD"} {
+	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "TMPDIR", "XDG_RUNTIME_DIR", "KUBERNETES_SERVICE_HOST", "HOSTNAME", "TERM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "GC_CONTROLLER_TOKEN", "not a name", "ROOMCITY_RUNTIME_URL", "GC_DOLT_PASSWORD", "BEADS_DOLT_PASSWORD"} {
 		require.NotContains(t, env, k)
 	}
 	require.NotEqual(t, "forged", env["ROOMCITY_TOKEN"], "what the server sets wins")
 	for _, v := range env {
 		require.NotEqual(t, "hunter2", v, "a known secret is not in the pod's spec")
+		require.NotEqual(t, "hunter2-beads", v)
 	}
 	require.Contains(t, logged.String(), "GC_DOLT_PASSWORD")
 	require.Contains(t, logged.String(), "PATH")

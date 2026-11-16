@@ -26,7 +26,7 @@ var podOwnPrefixes = []string{"XDG_", "KUBERNETES_", "LC_"}
 // Secrets of roomcity.toml, as bd's credentials do through
 // BEADS_CREDENTIALS_FILE, and a Job's spec is readable to whoever may read
 // Jobs.
-var knownSecrets = []string{"GC_DOLT_PASSWORD"}
+var knownSecrets = []string{"GC_DOLT_PASSWORD", "BEADS_DOLT_PASSWORD"}
 
 var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
