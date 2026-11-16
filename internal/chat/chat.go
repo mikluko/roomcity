@@ -104,8 +104,9 @@ type Driver interface {
 	Prune(ctx context.Context, keep []UserID) error
 	// OpenRooms returns the open rooms that are in the space now, by title.
 	OpenRooms(ctx context.Context, space RoomID) (map[string]RoomID, error)
-	// Retire takes a room out of its space and the speaker out of the room.
-	// The room stays for those who are in it.
+	// Retire takes a room out of its space and removes its members other
+	// than the city's own user, the speaker included. The city's own user
+	// stays, and the room remains available under its join rule.
 	Retire(ctx context.Context, room RoomID, speaker string) error
 	// Link returns an address that opens the room.
 	Link(room RoomID) string

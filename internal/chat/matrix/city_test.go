@@ -63,7 +63,7 @@ func TestServiceBuildsTheCityOfRoomsOnTheHomeserver(t *testing.T) {
 	sessions.Add(session.Info{Name: "s-" + key, Agent: key, Kind: session.AlwaysOn, State: session.Running})
 	startService(t, hs, sessions, []chat.UserID{alice})
 
-	var space, journal id.RoomID
+	var space, journal, agent id.RoomID
 	require.Eventually(t, func() bool {
 		resp, err := aliceIntent.JoinRoom(t.Context(), "#testcity:"+serverName, nil)
 		if err != nil {
@@ -78,8 +78,12 @@ func TestServiceBuildsTheCityOfRoomsOnTheHomeserver(t *testing.T) {
 		return true
 	}, 15*time.Second, 200*time.Millisecond, "the owner is invited to the space and to the journal")
 	require.Contains(t, spaceChildren(t, aliceIntent, space), journal, "the journal is in the space")
-	require.Eventually(t, func() bool { return roomNamed(t, aliceIntent, space, key) != "" },
-		15*time.Second, 200*time.Millisecond, "the always-on agent's room is in the space")
+	require.Eventually(t, func() bool {
+		agent = roomNamed(t, aliceIntent, space, key)
+		return agent != ""
+	}, 15*time.Second, 200*time.Millisecond, "the always-on agent's room is in the space")
+	_, err := aliceIntent.JoinRoomByID(t.Context(), agent)
+	require.NoError(t, err)
 
 	// A session started for a task gets a room in the space.
 	task := "t" + key
@@ -89,7 +93,7 @@ func TestServiceBuildsTheCityOfRoomsOnTheHomeserver(t *testing.T) {
 		room = roomNamed(t, aliceIntent, space, "worker s-"+task)
 		return room != ""
 	}, 15*time.Second, 200*time.Millisecond, "the task's room is in the space")
-	_, err := aliceIntent.JoinRoomByID(t.Context(), room)
+	_, err = aliceIntent.JoinRoomByID(t.Context(), room)
 	require.NoError(t, err, "the owner is in the space, so the room is open to them")
 
 	_, err = aliceIntent.SendText(t.Context(), room, "a word of direction")
@@ -97,8 +101,8 @@ func TestServiceBuildsTheCityOfRoomsOnTheHomeserver(t *testing.T) {
 	require.Eventually(t, func() bool { return len(sessions.Prompts("s-"+task)) == 1 }, 15*time.Second, 100*time.Millisecond,
 		"an owner's word in the task's room reaches the task's session")
 
-	// The session ends: its room leaves the space and the journal says so, with
-	// a link to the transcript.
+	// The session ends: its room is retired and the journal says so, with a
+	// link to the transcript.
 	sessions.Add(session.Info{Name: "s-" + task, Agent: "worker", Kind: session.Task, State: session.Ended})
 	sessions.Emit("s-"+task, session.Lifecycle{Seq: 9, Kind: session.Stopped})
 	require.Eventually(t, func() bool { return !slices.Contains(spaceChildren(t, aliceIntent, space), room) },
@@ -111,4 +115,12 @@ func TestServiceBuildsTheCityOfRoomsOnTheHomeserver(t *testing.T) {
 		}
 		return started && ended
 	}, 15*time.Second, 200*time.Millisecond, "the journal links the room, then the transcript")
+
+	cityBot := cityBotIntent(t, hs)
+	require.Equal(t, event.MembershipLeave, membership(t, cityBot, room, id.UserID(alice)), "the holder was removed from the task's room")
+	for _, kept := range []id.RoomID{space, journal, agent} {
+		require.Equal(t, event.MembershipJoin, membership(t, cityBot, kept, id.UserID(alice)), "the space, journal and always-on room keep their members")
+	}
+	_, err = aliceIntent.JoinRoomByID(t.Context(), room)
+	require.NoError(t, err, "the holder can enter the retired room again as a member of the space")
 }

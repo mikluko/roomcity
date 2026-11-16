@@ -1,7 +1,11 @@
 package chat_test
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +36,7 @@ func task(name string, state session.State) session.Info {
 	return session.Info{Name: name, Agent: "worker", Kind: session.Task, State: state}
 }
 
-func TestServiceGivesATaskSessionARoomThatLeavesTheSpaceAtItsEnd(t *testing.T) {
+func TestServiceRetiresATaskRoomAtTheSessionsEnd(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Running))
 	driver, handle := runService(t, sessions)
@@ -123,7 +127,7 @@ func TestServiceMakesNoRoomForATaskThatEndedBeforeItWasSeen(t *testing.T) {
 	}
 }
 
-func TestServiceTakesTheRoomOfATaskThatEndedWhileTheServerWasAwayOutOfTheSpace(t *testing.T) {
+func TestServiceRetiresTheRoomOfATaskThatEndedWhileTheServerWasAway(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Running))
 	sessions.Add(task("s 1/old", session.Ended))
@@ -138,6 +142,41 @@ func TestServiceTakesTheRoomOfATaskThatEndedWhileTheServerWasAwayOutOfTheSpace(t
 	for _, spec := range driver.allSpecs() {
 		require.False(t, spec.Open, "nothing is made for it")
 	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestServiceLogsARetirementFailureOnceAndWritesTheEnd(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(alwaysOn("host", session.Running))
+	sessions.Add(task("s-old", session.Ended))
+	driver := newFakeDriver()
+	driver.keep("worker s-old")
+	driver.retireErr = errors.New("one member could not be removed")
+	var logs lockedBuffer
+	runServiceWith(t, sessions, driver, func(svc *chat.Service) {
+		svc.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+
+	require.Eventually(t, func() bool { return len(driver.messagesIn("!journal")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, strings.Count(logs.String(), "retiring a task's room"))
+	require.Contains(t, logs.String(), "one member could not be removed")
+	require.Contains(t, driver.messagesIn("!journal")[0].Msg.Body, "ended")
 }
 
 func TestServiceReadsTheRoomsOfTheSpaceOncePerStart(t *testing.T) {

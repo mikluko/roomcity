@@ -42,6 +42,7 @@ type fakeDriver struct {
 	handler chan func(chat.Incoming)
 
 	retired   []retirement
+	retireErr error
 	opened    int                    // calls of OpenRooms
 	pruned    [][]chat.UserID        // the keep of each call of Prune
 	open      map[string]chat.RoomID // the open rooms that are in the space, by title
@@ -145,7 +146,7 @@ func (d *fakeDriver) Retire(_ context.Context, room chat.RoomID, speaker string)
 			delete(d.open, title)
 		}
 	}
-	return nil
+	return d.retireErr
 }
 
 func (d *fakeDriver) Link(room chat.RoomID) string { return "link:" + string(room) }
@@ -323,11 +324,12 @@ func TestServiceMakesARoomForEachAlwaysOnAgentAsItsSessionAppears(t *testing.T) 
 	}, driver.roomSpecs())
 }
 
-func TestServiceMakesTheRoomOfAnAgentWhoseSessionHasEnded(t *testing.T) {
+func TestServiceDoesNotRetireTheRoomOfAnAlwaysOnAgentWhoseSessionHasEnded(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Ended))
 	driver, _ := runService(t, sessions)
 	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Empty(t, driver.retirements())
 }
 
 func TestServiceTurnsAnOwnersMessageIntoAPrompt(t *testing.T) {

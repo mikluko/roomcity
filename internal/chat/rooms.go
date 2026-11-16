@@ -108,9 +108,9 @@ func (s *Service) taskSpec(info session.Info) RoomSpec {
 }
 
 // attachTask follows a task's session in a room of its own while it runs. The
-// room leaves the space when the session's own stream ends, so that what the
-// agent said last is shown first. A session that ended while nobody watched
-// is settled here, if its room is still in the space.
+// room is retired when the session's own stream ends, so that what the agent
+// said last is shown first. A session that ended while nobody watched is
+// settled here, if its room is still in the space.
 func (s *Service) attachTask(ctx context.Context, wg *sync.WaitGroup, info session.Info) {
 	lock := s.agentLock("task " + info.Name)
 	lock.Lock()
@@ -164,7 +164,7 @@ func (s *Service) startTask(ctx context.Context, wg *sync.WaitGroup, info sessio
 	}
 }
 
-// endTask takes a task's room out of the space once its session has ended.
+// endTask retires a task's room once its session has ended.
 func (s *Service) endTask(ctx context.Context, info session.Info, task *taskRoom) {
 	task.cancel()
 	s.mu.Lock()
@@ -174,9 +174,8 @@ func (s *Service) endTask(ctx context.Context, info session.Info, task *taskRoom
 	s.retireTask(ctx, info, task.target.room)
 }
 
-// settleEnded takes the room of a task whose session ended while the server
-// was away out of the space, if it is still there, and writes the journal's
-// line for the end.
+// settleEnded retires the room of a task whose session ended while the server
+// was away, if it is still there, and writes the journal's line for the end.
 func (s *Service) settleEnded(ctx context.Context, info session.Info) {
 	s.mu.Lock()
 	room := s.known[s.taskSpec(info).Title]
@@ -191,7 +190,7 @@ func (s *Service) retireTask(ctx context.Context, info session.Info, room RoomID
 	delete(s.known, s.taskSpec(info).Title)
 	s.mu.Unlock()
 	if err := s.Driver.Retire(ctx, room, info.Agent); err != nil {
-		s.Log.Error("taking a task's room out of the space", "session", info.Name, "err", err)
+		s.Log.Error("retiring a task's room", "session", info.Name, "err", err)
 	}
 	body := fmt.Sprintf("The session of **%s**, %s, ended.", info.Agent, info.Name)
 	if s.Transcripts != "" {

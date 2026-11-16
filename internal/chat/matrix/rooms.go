@@ -282,13 +282,39 @@ func (d *Driver) Retire(ctx context.Context, room chat.RoomID, speaker string) e
 	if err != nil {
 		return err
 	}
-	if intent.UserID == bot.UserID {
-		return nil
+	remove := func(user id.UserID) error {
+		_, err := bot.KickUser(ctx, id.RoomID(room), &mautrix.ReqKickUser{UserID: user, Reason: "the session ended"})
+		return err
 	}
-	if _, err := intent.LeaveRoom(ctx, id.RoomID(room)); err != nil {
-		return fmt.Errorf("%s leaving %s: %w", intent.UserID, room, err)
+	leave := func() error {
+		_, err := intent.LeaveRoom(ctx, id.RoomID(room))
+		return err
 	}
-	return nil
+	return retireMembers(id.RoomID(room), bot.UserID, intent.UserID, state, remove, leave)
+}
+
+func retireMembers(room id.RoomID, city, speaker id.UserID, state mautrix.RoomStateMap, remove func(id.UserID) error, leave func() error) error {
+	var errs []error
+	for key, evt := range state[event.StateMember] {
+		user := id.UserID(key)
+		if user == city || user == speaker {
+			continue
+		}
+		_ = evt.Content.ParseRaw(event.StateMember) // an event that is parsed already says so
+		member := evt.Content.AsMember()
+		if member == nil || !member.Membership.IsInviteOrJoin() && member.Membership != event.MembershipKnock {
+			continue
+		}
+		if err := remove(user); err != nil {
+			errs = append(errs, fmt.Errorf("removing %s from %s: %w", user, room, err))
+		}
+	}
+	if speaker != city {
+		if err := leave(); err != nil {
+			errs = append(errs, fmt.Errorf("%s leaving %s: %w", speaker, room, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Link implements chat.Driver.

@@ -57,16 +57,24 @@ func TestSpaceHoldsTheRoomsOfTheCityAndOpensATaskRoomToItsMembers(t *testing.T) 
 
 	require.Contains(t, spaceChildren(t, aliceIntent, id.RoomID(space)), id.RoomID(room))
 
-	// The room leaves the space and the agent's user leaves the room.
+	// Retirement empties the room but keeps it open to the space's members.
 	require.NoError(t, d.Retire(t.Context(), room, "worker"))
 	gone, err := d.OpenRooms(t.Context(), space)
 	require.NoError(t, err)
 	require.NotContains(t, gone, title, "a room that left the space is no longer listed")
 	require.NotContains(t, spaceChildren(t, aliceIntent, id.RoomID(space)), id.RoomID(room))
-	members, err := aliceIntent.JoinedMembers(t.Context(), id.RoomID(room))
+	cityBot := cityBotIntent(t, hs)
+	members, err := cityBot.JoinedMembers(t.Context(), id.RoomID(room))
 	require.NoError(t, err)
 	require.NotContains(t, members.Joined, id.NewUserID("testcity-worker", serverName))
-	require.Contains(t, members.Joined, id.UserID(alice), "the people in the room stay")
+	require.NotContains(t, members.Joined, id.UserID(alice), "the people in the room are removed")
+	require.Contains(t, members.Joined, cityBot.UserID, "the city's own user keeps the room")
+	var removed event.MemberEventContent
+	require.NoError(t, cityBot.StateEvent(t.Context(), id.RoomID(room), event.StateMember, string(alice), &removed))
+	require.Equal(t, event.MembershipLeave, removed.Membership)
+	require.Equal(t, "the session ended", removed.Reason)
+	_, err = aliceIntent.JoinRoomByID(t.Context(), id.RoomID(room))
+	require.NoError(t, err, "a member of the space can enter the retired room again")
 
 	// A room of the same name made after is a new room.
 	next, err := d.EnsureRoom(t.Context(), task)

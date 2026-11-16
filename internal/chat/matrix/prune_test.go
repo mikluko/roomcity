@@ -51,6 +51,10 @@ func TestPruneRemovesThoseWhoHoldNoRoleFromEveryRoomOfTheCity(t *testing.T) {
 	require.NoError(t, err)
 	// The task's room has left the space, and its members can still open it.
 	require.NoError(t, d.Retire(t.Context(), task, "worker"))
+	for _, user := range []*appservice.IntentAPI{aliceIntent, bobIntent} {
+		_, err := user.JoinRoomByID(t.Context(), id.RoomID(task))
+		require.NoError(t, err)
+	}
 	require.Equal(t, event.MembershipJoin, membership(t, bobIntent, id.RoomID(task), id.UserID(bob)))
 
 	require.NoError(t, d.Prune(t.Context(), []chat.UserID{alice}))
