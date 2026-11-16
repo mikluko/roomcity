@@ -61,10 +61,19 @@ type RoomSpec struct {
 	Key string
 	// Title is the room's name as people see it.
 	Title string
-	// Speaker is the agent that speaks in the room.
+	// Speaker is the agent that speaks in the room; "" is the city's own
+	// user, which speaks in the journal.
 	Speaker string
 	// Invite lists the people let into the room.
 	Invite []UserID
+	// IsSpace makes the room a space: a room that holds other rooms.
+	IsSpace bool
+	// Space, when set, puts the room in that space.
+	Space RoomID
+	// Open lets the members of Space into the room without an invitation. An
+	// open room has no name of its own to be found by: it is found again by
+	// its Title among the rooms of Space, which must therefore be unique.
+	Open bool
 }
 
 // Incoming is a message that someone sent to a room.
@@ -89,6 +98,14 @@ type Driver interface {
 	// time. It invites every user of the spec's Invite who is not in the
 	// room yet, and leaves the others as they are.
 	EnsureRoom(ctx context.Context, spec RoomSpec) (RoomID, error)
+	// FindRoom returns the room of the spec as EnsureRoom would find it, or
+	// "" when there is none: it makes nothing.
+	FindRoom(ctx context.Context, spec RoomSpec) (RoomID, error)
+	// Retire takes a room out of its space and the speaker out of the room.
+	// The room stays for those who are in it.
+	Retire(ctx context.Context, room RoomID, speaker string) error
+	// Link returns an address that opens the room.
+	Link(room RoomID) string
 	// Send sends a message to a room as the speaker.
 	Send(ctx context.Context, room RoomID, speaker string, msg Message) (MessageID, error)
 	// React puts a reaction on a message as the speaker.

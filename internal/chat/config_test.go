@@ -8,6 +8,10 @@ import (
 )
 
 const sandboxConfig = `
+[chat]
+name = "sandbox"
+transcripts = "https://sandbox.gs.sarak.sh/-/"
+
 [[chat.holders]]
 id = "@mikluko:sarak.sh"
 role = "owner"
@@ -23,6 +27,8 @@ func TestConfigReadsTheChatSectionOfRoomcityToml(t *testing.T) {
 	}
 	require.NoError(t, toml.Unmarshal([]byte(sandboxConfig), &file))
 	require.NoError(t, file.Chat.Validate())
+	require.Equal(t, "sandbox", file.Chat.Name)
+	require.Equal(t, "https://sandbox.gs.sarak.sh/-/", file.Chat.Transcripts)
 	require.Equal(t, []UserID{"@mikluko:sarak.sh", "@_prototype_owner:sarak.sh"}, file.Chat.Owners())
 }
 

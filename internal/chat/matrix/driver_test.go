@@ -185,6 +185,7 @@ func runService(t *testing.T, hs string, key string, owners []chat.UserID) *chat
 		Sessions: sessions,
 		Owners:   owners,
 		Log:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		City:     "testcity",
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)

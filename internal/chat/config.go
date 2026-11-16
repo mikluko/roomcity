@@ -11,6 +11,12 @@ const RoleOwner = "owner"
 // Config is the chat section of roomcity.toml, the table [chat]. What is
 // particular to a chat system is in the table of its driver.
 type Config struct {
+	// Name is the city's name, which the space is called.
+	Name string `toml:"name"`
+	// Transcripts is the address that a session's name is added to for the
+	// link to its transcript, such as "https://sandbox.gs.sarak.sh/-/". With
+	// none, the journal links no transcript.
+	Transcripts string `toml:"transcripts"`
 	// Holders maps chat ids onto roles. An id is opaque here: the driver says
 	// whether it is one of its own.
 	Holders []Holder `toml:"holders"`

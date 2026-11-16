@@ -26,6 +26,15 @@ type Service struct {
 	// PlanEvery is the shortest gap between two edits of the plan notice;
 	// zero means 1.2 seconds.
 	PlanEvery time.Duration
+	// City is the city's name, which the space is called.
+	City string
+	// Transcripts is the address that a session's name is added to for the
+	// link to its transcript; with none, the journal links no transcript.
+	Transcripts string
+
+	space, journal RoomID
+	ready          chan struct{} // closed once the space and the journal are made
+	tasks          map[string]*taskRoom
 
 	mu     sync.Mutex
 	rooms  map[string]RoomID        // by agent
@@ -74,6 +83,9 @@ func (s *Service) Run(ctx context.Context) error {
 	s.by = map[RoomID]*agentSession{}
 	s.subs = map[string]struct{}{}
 	s.making = map[string]*sync.Mutex{}
+	s.ready = make(chan struct{})
+	s.tasks = map[string]*taskRoom{}
+	wg.Go(func() { s.makeBase(ctx) })
 
 	infos, err := s.Sessions.Watch(ctx)
 	if err != nil {
@@ -94,9 +106,7 @@ func (s *Service) Run(ctx context.Context) error {
 				}
 				return errors.New("the watch of the sessions ended")
 			}
-			if info.Kind == session.AlwaysOn {
-				wg.Go(func() { s.attach(ctx, &wg, info) })
-			}
+			wg.Go(func() { s.attach(ctx, &wg, info) })
 		case err := <-received:
 			return err
 		case <-ctx.Done():
@@ -107,6 +117,15 @@ func (s *Service) Run(ctx context.Context) error {
 
 // attach makes the agent's room if it has none and follows the session in it.
 func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.Info) {
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return
+	}
+	if info.Kind == session.Task {
+		s.attachTask(ctx, wg, info)
+		return
+	}
 	room, ok := s.room(ctx, info)
 	if !ok {
 		return
@@ -139,46 +158,35 @@ func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.I
 		s.mu.Unlock()
 		return
 	}
-	wg.Go(func() { s.render(ctx, target, info.Name, events) })
+	wg.Go(func() { s.render(ctx, target, info.Name, events, nil) })
 }
 
-// room returns the agent's room, making it if it has none, and tries again
-// after a pause for as long as the chat system fails. It reports false when
-// ctx ended first.
+// room returns the agent's room, making it if it has none. It reports false
+// when ctx ended first.
 func (s *Service) room(ctx context.Context, info session.Info) (RoomID, bool) {
 	lock := s.agentLock(info.Agent)
 	lock.Lock()
 	defer lock.Unlock()
-	pause := s.RetryEvery
-	if pause == 0 {
-		pause = 5 * time.Second
+	s.mu.Lock()
+	room, ok := s.rooms[info.Agent]
+	s.mu.Unlock()
+	if ok {
+		return room, true
 	}
-	for {
-		s.mu.Lock()
-		room, ok := s.rooms[info.Agent]
-		s.mu.Unlock()
-		if ok {
-			return room, true
-		}
-		room, err := s.Driver.EnsureRoom(ctx, RoomSpec{
-			Key:     info.Agent,
-			Title:   info.Agent,
-			Speaker: info.Agent,
-			Invite:  s.Owners,
-		})
-		if err == nil {
-			s.mu.Lock()
-			s.rooms[info.Agent] = room
-			s.mu.Unlock()
-			return room, true
-		}
-		s.Log.Error("making the room of an agent, trying again", "agent", info.Agent, "err", err)
-		select {
-		case <-time.After(pause):
-		case <-ctx.Done():
-			return "", false
-		}
+	room, ok = s.ensure(ctx, RoomSpec{
+		Key:     info.Agent,
+		Title:   info.Agent,
+		Speaker: info.Agent,
+		Invite:  s.Owners,
+		Space:   s.space,
+	})
+	if !ok {
+		return "", false
 	}
+	s.mu.Lock()
+	s.rooms[info.Agent] = room
+	s.mu.Unlock()
+	return room, true
 }
 
 func (s *Service) agentLock(agent string) *sync.Mutex {
@@ -191,8 +199,9 @@ func (s *Service) agentLock(agent string) *sync.Mutex {
 }
 
 // render follows one session's events and the room's inputs until the events
-// end.
-func (s *Service) render(ctx context.Context, t *agentSession, name string, events <-chan session.Event) {
+// end, or, when onStopped is set, until the session's own end, after which it
+// calls onStopped.
+func (s *Service) render(ctx context.Context, t *agentSession, name string, events <-chan session.Event, onStopped func()) {
 	r := newRenderer(&roomOutbox{s: s, ctx: ctx, t: t, session: name}, time.Now, s.PlanEvery)
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
@@ -202,7 +211,12 @@ func (s *Service) render(ctx context.Context, t *agentSession, name string, even
 			if !ok {
 				return
 			}
+			s.journalAfresh(ctx, t, ev)
 			r.event(ev)
+			if l, ok := ev.(session.Lifecycle); ok && l.Kind == session.Stopped && onStopped != nil {
+				onStopped()
+				return
+			}
 		case in := <-t.inputs:
 			if in.Kind == Reaction {
 				r.answerPermission(in.To, in.Key, in.Sender)
@@ -212,6 +226,14 @@ func (s *Service) render(ctx context.Context, t *agentSession, name string, even
 		case <-tick.C:
 			r.tick()
 		}
+	}
+}
+
+// journalAfresh tells the journal that an always-on agent's session began
+// anew, with a link to its room.
+func (s *Service) journalAfresh(ctx context.Context, t *agentSession, ev session.Event) {
+	if l, ok := ev.(session.Lifecycle); ok && l.Kind == session.StartedAfresh {
+		s.journalNotice(ctx, fmt.Sprintf("The session of **%s** began anew: [%s](%s)", t.agent, t.agent, s.Driver.Link(t.room)))
 	}
 }
 

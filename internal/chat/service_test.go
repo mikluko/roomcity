@@ -24,6 +24,11 @@ type sent struct {
 	Msg     chat.Message
 }
 
+type retirement struct {
+	Room    chat.RoomID
+	Speaker string
+}
+
 type reaction struct {
 	To  chat.MessageID
 	Key string
@@ -36,6 +41,8 @@ type fakeDriver struct {
 	sent    []sent
 	handler chan func(chat.Incoming)
 
+	retired   []retirement
+	open      map[string]chat.RoomID // the open rooms that are in the space, by title
 	reactions []reaction
 	typings   []bool
 	undone    []chat.ReactionID
@@ -44,7 +51,7 @@ type fakeDriver struct {
 }
 
 func newFakeDriver() *fakeDriver {
-	return &fakeDriver{handler: make(chan func(chat.Incoming), 1)}
+	return &fakeDriver{handler: make(chan func(chat.Incoming), 1), open: map[string]chat.RoomID{}}
 }
 
 func (d *fakeDriver) EnsureRoom(_ context.Context, spec chat.RoomSpec) (chat.RoomID, error) {
@@ -54,8 +61,43 @@ func (d *fakeDriver) EnsureRoom(_ context.Context, spec chat.RoomSpec) (chat.Roo
 	if len(d.specs) <= d.failures {
 		return "", errors.New("the chat system is restarting")
 	}
+	switch {
+	case spec.IsSpace:
+		return "!space", nil
+	case spec.Open:
+		room := chat.RoomID("!" + spec.Title)
+		d.open[spec.Title] = room
+		return room, nil
+	}
 	return chat.RoomID("!" + spec.Key), nil
 }
+
+func (d *fakeDriver) FindRoom(_ context.Context, spec chat.RoomSpec) (chat.RoomID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.open[spec.Title], nil
+}
+
+// keep puts an open room in the space that the city had before this run.
+func (d *fakeDriver) keep(title string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.open[title] = chat.RoomID("!" + title)
+}
+
+func (d *fakeDriver) Retire(_ context.Context, room chat.RoomID, speaker string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.retired = append(d.retired, retirement{room, speaker})
+	for title, r := range d.open {
+		if r == room {
+			delete(d.open, title)
+		}
+	}
+	return nil
+}
+
+func (d *fakeDriver) Link(room chat.RoomID) string { return "link:" + string(room) }
 
 func (d *fakeDriver) Send(_ context.Context, room chat.RoomID, speaker string, msg chat.Message) (chat.MessageID, error) {
 	d.mu.Lock()
@@ -106,10 +148,30 @@ func (d *fakeDriver) messages() []sent {
 	return append([]sent(nil), d.sent...)
 }
 
+// roomSpecs returns the specs of the rooms of the always-on agents.
 func (d *fakeDriver) roomSpecs() []chat.RoomSpec {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	var out []chat.RoomSpec
+	for _, spec := range d.specs {
+		if !spec.IsSpace && !spec.Open && spec.Key != "journal" {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+// allSpecs returns every spec EnsureRoom was called with, in order.
+func (d *fakeDriver) allSpecs() []chat.RoomSpec {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return append([]chat.RoomSpec(nil), d.specs...)
+}
+
+func (d *fakeDriver) retirements() []retirement {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]retirement(nil), d.retired...)
 }
 
 const owner = chat.UserID("@owner:test.local")
@@ -157,7 +219,9 @@ func runServiceWith(t *testing.T, sessions *chattest.Sessions, driver *fakeDrive
 		Owners:   []chat.UserID{owner},
 		Log:      slog.New(slog.DiscardHandler),
 
-		RetryEvery: 10 * time.Millisecond,
+		City:        "testcity",
+		Transcripts: "https://t/-/",
+		RetryEvery:  10 * time.Millisecond,
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -188,8 +252,8 @@ func TestServiceMakesARoomForEachAlwaysOnAgentAsItsSessionAppears(t *testing.T) 
 
 	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 2 }, 5*time.Second, 10*time.Millisecond)
 	require.ElementsMatch(t, []chat.RoomSpec{
-		{Key: "host", Title: "host", Speaker: "host", Invite: []chat.UserID{owner}},
-		{Key: "guest", Title: "guest", Speaker: "guest", Invite: []chat.UserID{owner}},
+		{Key: "host", Title: "host", Speaker: "host", Invite: []chat.UserID{owner}, Space: "!space"},
+		{Key: "guest", Title: "guest", Speaker: "guest", Invite: []chat.UserID{owner}, Space: "!space"},
 	}, driver.roomSpecs())
 }
 
@@ -270,9 +334,22 @@ func TestServiceTellsTheRoomWhenTheSessionBeginsAnew(t *testing.T) {
 	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 1 }, 5*time.Second, 10*time.Millisecond)
 
 	sessions.Emit("s-host", session.Lifecycle{Seq: 7, Kind: session.StartedAfresh})
-	require.Eventually(t, func() bool { return len(driver.messages()) == 1 }, 5*time.Second, 10*time.Millisecond)
-	require.Equal(t, chat.Notice, driver.messages()[0].Msg.Kind)
-	require.Equal(t, chat.RoomID("!host"), driver.messages()[0].Room)
+	require.Eventually(t, func() bool { return len(driver.messagesIn("!host")) == 1 && len(driver.messagesIn("!journal")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, chat.Notice, driver.messagesIn("!host")[0].Msg.Kind)
+	journal := driver.messagesIn("!journal")[0]
+	require.Equal(t, "", journal.Speaker, "the city's own user writes the journal")
+	require.Contains(t, journal.Msg.Body, "began anew")
+	require.Contains(t, journal.Msg.Body, "(link:!host)", "the journal links the room")
+}
+
+func (d *fakeDriver) messagesIn(room chat.RoomID) []sent {
+	var out []sent
+	for _, m := range d.messages() {
+		if m.Room == room {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // answerText joins the text chunks of the agent's message, which is what the
@@ -312,8 +389,8 @@ func TestServiceTriesAgainUntilTheRoomIsMade(t *testing.T) {
 	driver.failures = 3
 	_, handle := runServiceWith(t, sessions, driver)
 
-	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 4 }, 5*time.Second, 10*time.Millisecond)
 	awaitRoom(t, sessions, handle)
+	require.Greater(t, len(driver.allSpecs()), 3, "the failed calls were made again")
 }
 
 func TestServiceEndsWithAnErrorWhenTheWatchEnds(t *testing.T) {

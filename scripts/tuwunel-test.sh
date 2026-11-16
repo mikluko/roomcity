@@ -46,7 +46,7 @@ namespaces:
       regex: '^@testcity(-[a-z0-9._=-]+)?:test\\.local\$'
   aliases:
     - exclusive: true
-      regex: '^#testcity-[a-z0-9._=-]+:test\\.local\$'
+      regex: '^#testcity(-[a-z0-9._=-]+)?:test\\.local\$'
 EOF
   cat >"$dir/appservices/testowner.yaml" <<EOF
 id: testowner

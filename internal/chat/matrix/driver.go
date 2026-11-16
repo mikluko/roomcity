@@ -4,7 +4,6 @@ package matrix
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -13,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/appservice"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -89,75 +87,12 @@ func (f forwarded) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f.next.RoundTrip(req)
 }
 
-// EnsureRoom implements chat.Driver. The room is found by its alias,
-// #<City>-<Key>:<ServerName>, so it needs no record of its own.
-func (d *Driver) EnsureRoom(ctx context.Context, spec chat.RoomSpec) (chat.RoomID, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	bot := d.as.BotIntent()
-	alias := id.NewRoomAlias(d.cfg.City+"-"+spec.Key, d.cfg.ServerName)
-	room, err := d.findRoom(ctx, alias)
-	if err != nil {
-		return "", err
-	}
-	if room == "" {
-		room, err = d.createRoom(ctx, spec, alias)
-		if err != nil {
-			return "", err
-		}
-	}
-	for _, user := range spec.Invite {
-		if err := bot.EnsureInvited(ctx, room, id.UserID(user)); err != nil {
-			return "", fmt.Errorf("inviting %s to %s: %w", user, alias, err)
-		}
-		if _, err := bot.SetPowerLevel(ctx, room, id.UserID(user), ownerPowerLevel); err != nil {
-			return "", fmt.Errorf("giving %s power in %s: %w", user, alias, err)
-		}
-	}
-	speaker, err := d.speaker(ctx, spec.Speaker)
-	if err != nil {
-		return "", err
-	}
-	if err := speaker.EnsureJoined(ctx, room); err != nil {
-		return "", fmt.Errorf("letting %s into %s: %w", speaker.UserID, alias, err)
-	}
-	d.rooms[chat.RoomID(room)] = struct{}{}
-	return chat.RoomID(room), nil
-}
-
-func (d *Driver) findRoom(ctx context.Context, alias id.RoomAlias) (id.RoomID, error) {
-	resp, err := d.as.BotClient().ResolveAlias(ctx, alias)
-	switch {
-	case err == nil:
-		return resp.RoomID, nil
-	case errors.Is(err, mautrix.MNotFound):
-		return "", nil
-	}
-	return "", fmt.Errorf("resolving %s: %w", alias, err)
-}
-
-func (d *Driver) createRoom(ctx context.Context, spec chat.RoomSpec, alias id.RoomAlias) (id.RoomID, error) {
-	levels := map[id.UserID]int{}
-	for _, user := range spec.Invite {
-		levels[id.UserID(user)] = ownerPowerLevel
-	}
-	resp, err := d.as.BotClient().CreateRoom(ctx, &mautrix.ReqCreateRoom{
-		Visibility:         "private",
-		Preset:             "private_chat",
-		RoomAliasName:      d.cfg.City + "-" + spec.Key,
-		Name:               spec.Title,
-		PowerLevelOverride: &event.PowerLevelsEventContent{Users: levels},
-	})
-	if err != nil {
-		return "", fmt.Errorf("creating %s: %w", alias, err)
-	}
-	return resp.RoomID, nil
-}
-
 // speaker returns the intent of the user that speaks for an agent, making the
 // user the first time.
 func (d *Driver) speaker(ctx context.Context, name string) (*appservice.IntentAPI, error) {
+	if name == "" {
+		return d.as.BotIntent(), nil
+	}
 	if intent, ok := d.speakers[name]; ok {
 		return intent, nil
 	}
