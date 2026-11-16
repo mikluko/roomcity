@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-16
+
 ### Added
 
 - `[server] purge_every`, a duration such as `"1m"` (default one hour): how often the transcripts past their `transcript_term` are removed. A short term and a short gap let a transcript be watched going.
@@ -148,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.6.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.7.0...HEAD
+[0.7.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.7.0
 [0.6.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.6.0
 [0.5.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.5.0
 [0.4.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.4.0
