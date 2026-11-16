@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-16
+
 ### Fixed
 
 - A session's pod gets the environment gc set for the agent, and not only the `GC_*` variables of it: a provider's `env` from `city.toml` (goose's `GOOSE_PROVIDER`, `GOOSE_MODEL`, `OPENAI_HOST`...) reaches the pod, so that `guest` no longer fails with "Configuration value not found: GOOSE_PROVIDER". What the pod has of its own is left out: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `PWD`, `OLDPWD`, `TMPDIR`, `HOSTNAME`, `TERM`, the locale (`LANG`, `LANGUAGE`, `LC_*`), `XDG_*` and `KUBERNETES_*`; the server's own `ROOMCITY_*` win; and `GC_DOLT_PASSWORD`, a secret gc sets, is not written into the Job's spec (bd reads its credentials from the file `BEADS_CREDENTIALS_FILE` names). The start logs, by name, what it left out.
@@ -93,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.2...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.3...HEAD
+[0.3.3]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.3
 [0.3.2]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.2
 [0.3.1]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.1
 [0.3.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.0
