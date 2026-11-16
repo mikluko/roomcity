@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
 ### Added
 
 - The registry keeps each start of a session: a number, when it began and ended, how it ended (`stop`; `reset`; `failed` for a start that did not come up; `lost` for a box found dead, or a pod lost without a stop), its chat room, the id of gc's session bead and the first and last event of it, so that one name has a transcript for each start (`Registry.Starts`, `SetRoom`). One numbering of events still runs across the starts.
@@ -134,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.5.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.6.0...HEAD
+[0.6.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.6.0
 [0.5.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.5.0
 [0.4.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.4.0
 [0.3.3]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.3
