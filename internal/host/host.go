@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -172,25 +171,15 @@ func (h *host) run(ctx context.Context) error {
 	if err := h.runCommands(ctx, manifest.PreStart, true); err != nil {
 		return err
 	}
-	// The host is Claude Code's: the program of gc's command is not run, only
-	// the words after it are claude's arguments.
-	if len(manifest.Command) > 1 {
-		h.cfg.Claude.ClaudeArgs = append(append([]string(nil), h.cfg.Claude.ClaudeArgs...), manifest.Command[1:]...)
+	ag, err := h.startAgent(ctx, manifest.Command)
+	if err != nil {
+		return err
 	}
-
-	// The agent and the host's client of it speak over two pipes, each
+	// The host's client of the agent speaks to it over its streams, each
 	// tapped where its messages pass.
-	toAgentR, toAgentW := io.Pipe()
-	fromAgentR, fromAgentW := io.Pipe()
-	served := make(chan error, 1)
-	go func() {
-		err := claudeacp.Serve(ctx, toAgentR, fromAgentW, h.cfg.Claude)
-		_ = fromAgentW.Close()
-		served <- err
-	}()
 	conn := acp.NewAgentConn(
-		newTapReader(fromAgentR, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT),
-		newTapWriter(toAgentW, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT),
+		newTapReader(ag.r, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_FROM_AGENT),
+		newTapWriter(ag.w, h.rec, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT),
 		func(*acp.AgentConn) acp.Client { return &agentClient{h: h} },
 	)
 	h.conn = conn
@@ -214,8 +203,8 @@ func (h *host) run(ctx context.Context) error {
 	}
 	ended := ctx.Err() != nil
 	cancel()
-	_ = toAgentW.Close()
-	sErr := <-served
+	_ = ag.w.Close()
+	sErr := <-ag.done
 	wg.Wait()
 	h.flush()
 	h.mu.Lock()
