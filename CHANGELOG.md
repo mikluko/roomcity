@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-16
+
 ### Added
 
 - `[kube] pod_annotations` and `[agents.<name>] pod_annotations`: annotations put on the pods of the sessions (the agent's win by key). A value may name `{agent}` and `{session}`, which the Job's creation replaces, and a key must be one Kubernetes takes, or the configuration is refused at load. It is the way to give a session's pod what an operator reads off a pod's annotations, such as OpenTelemetry's `instrumentation.opentelemetry.io/inject-sdk` and `resource.opentelemetry.io/service.name`.
@@ -197,7 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.10.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.11.0...HEAD
+[0.11.0]: https://sarak.sh/mikluko/roomcity/compare/v0.10.0...v0.11.0
 [0.10.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.10.0
 [0.9.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.9.0
 [0.8.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.8.0
