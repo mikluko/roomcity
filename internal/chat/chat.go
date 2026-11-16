@@ -98,6 +98,10 @@ type Driver interface {
 	// time. It invites every user of the spec's Invite who is not in the
 	// room yet, and leaves the others as they are.
 	EnsureRoom(ctx context.Context, spec RoomSpec) (RoomID, error)
+	// Prune removes from every room of the city anyone who is neither one
+	// of the city's own speakers nor in keep: those who held a role once and
+	// hold none now. It refuses an empty keep, which is a mistake.
+	Prune(ctx context.Context, keep []UserID) error
 	// OpenRooms returns the open rooms that are in the space now, by title.
 	OpenRooms(ctx context.Context, space RoomID) (map[string]RoomID, error)
 	// Retire takes a room out of its space and the speaker out of the room.

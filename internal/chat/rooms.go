@@ -47,10 +47,24 @@ func (s *Service) makeBase(ctx context.Context) {
 	if !ok {
 		return
 	}
+	s.prune(ctx)
 	s.mu.Lock()
 	s.space, s.journal, s.known = space, journal, known
 	s.mu.Unlock()
 	close(s.ready)
+}
+
+// prune removes from the city's rooms those who no longer hold a role. With no
+// owner in the configuration it removes no one: that is a mistake, not a wish
+// to empty the city.
+func (s *Service) prune(ctx context.Context) {
+	if len(s.Owners) == 0 {
+		s.Log.Warn("no one holds the owner's role, so no one is removed from the rooms")
+		return
+	}
+	if err := s.Driver.Prune(ctx, s.Owners); err != nil {
+		s.Log.Error("removing those who hold no role from the rooms", "err", err)
+	}
 }
 
 // readKnown reads the open rooms of the space, once, and tries again after a

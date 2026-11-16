@@ -43,6 +43,7 @@ type fakeDriver struct {
 
 	retired   []retirement
 	opened    int                    // calls of OpenRooms
+	pruned    [][]chat.UserID        // the keep of each call of Prune
 	open      map[string]chat.RoomID // the open rooms that are in the space, by title
 	reactions []reaction
 	typings   []bool
@@ -89,6 +90,13 @@ func (d *fakeDriver) keep(title string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.open[title] = chat.RoomID("!" + title)
+}
+
+func (d *fakeDriver) Prune(_ context.Context, keep []chat.UserID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pruned = append(d.pruned, keep)
+	return nil
 }
 
 func (d *fakeDriver) Retire(_ context.Context, room chat.RoomID, speaker string) error {
