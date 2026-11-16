@@ -53,7 +53,8 @@ func TestTranscriptHoldsTheWholeStreamWithItsTimesAndTheCard(t *testing.T) {
 			require.Equal(t, e.Time, ev.Time)
 		}
 	}
-	require.Equal(t, []string{"lifecycle", "prompt", "frame", "frame", "lifecycle"}, kinds)
+	// The prompt was never delivered: the end closes its record.
+	require.Equal(t, []string{"lifecycle", "prompt", "frame", "frame", "prompt", "lifecycle"}, kinds)
 
 	_, _, err = r.Transcript(ctx, "nobody")
 	require.ErrorIs(t, err, session.ErrNotFound)

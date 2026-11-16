@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -299,6 +300,74 @@ func (j *Jobs) Running(ctx context.Context) ([]string, error) {
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+func info(job *batchv1.Job) operate.JobInfo {
+	return operate.JobInfo{
+		Session: job.Annotations[annotSession],
+		ID:      string(job.UID),
+		Created: job.CreationTimestamp.Time,
+		Alive:   !finished(job),
+	}
+}
+
+// Info describes the session's Job; the zero JobInfo is no Job.
+func (j *Jobs) Info(ctx context.Context, session string) (operate.JobInfo, bool, error) {
+	job, err := j.client.BatchV1().Jobs(j.cfg.Namespace).Get(ctx, jobName(session), metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return operate.JobInfo{}, false, nil
+	case err != nil:
+		return operate.JobInfo{}, false, err
+	}
+	return info(job), true, nil
+}
+
+// List describes every Job of the namespace that is a session's, those
+// that have failed or completed included, with one read of the cluster.
+func (j *Jobs) List(ctx context.Context) ([]operate.JobInfo, error) {
+	list, err := j.client.BatchV1().Jobs(j.cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labelManagedBy + "=" + managedBy})
+	if err != nil {
+		return nil, err
+	}
+	var out []operate.JobInfo
+	for i := range list.Items {
+		if in := info(&list.Items[i]); in.Session != "" {
+			out = append(out, in)
+		}
+	}
+	return out, nil
+}
+
+// DeleteObject deletes the session's Job if it is the one with that id, and
+// reports whether it did: a Job that is gone, or that is another's under the
+// name, is left as it is. The cluster refuses the delete of a Job whose UID
+// is not the one asked for.
+func (j *Jobs) DeleteObject(ctx context.Context, session, id string) (bool, error) {
+	policy := metav1.DeletePropagationBackground
+	uid := types.UID(id)
+	// The Job is read first, and the delete still carries the UID, so that a
+	// Job made under the name between the two is not the one deleted.
+	cur, err := j.client.BatchV1().Jobs(j.cfg.Namespace).Get(ctx, jobName(session), metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	case cur.UID != uid:
+		return false, nil
+	}
+	err = j.client.BatchV1().Jobs(j.cfg.Namespace).Delete(ctx, jobName(session), metav1.DeleteOptions{
+		PropagationPolicy: &policy,
+		Preconditions:     &metav1.Preconditions{UID: &uid},
+	})
+	switch {
+	case apierrors.IsNotFound(err), apierrors.IsConflict(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return true, nil
 }
 
 func finished(job *batchv1.Job) bool {

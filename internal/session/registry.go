@@ -194,6 +194,13 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
+		if lk == StartedAfresh {
+			// The queue is emptied below: what the owner wrote and had not
+			// seen taken is dropped with it, and its record closed.
+			if err := r.dropOwnersPrompts(tx, name); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(`
 			INSERT INTO sessions (name, agent, kind, state, token_hash, host_seq, rev)
 			VALUES (?, ?, ?, ?, ?, 0, 1)
@@ -222,6 +229,11 @@ func (r *Registry) Start(ctx context.Context, name, agent string, kind Kind) (st
 func (r *Registry) End(ctx context.Context, name string) error {
 	err := r.tx(ctx, func(tx *sql.Tx) error {
 		if err := r.setState(tx, name, Ended); err != nil {
+			return err
+		}
+		// An ended session delivers nothing more: the owner's prompts that
+		// waited are dropped, and their records closed.
+		if err := r.dropOwnersPrompts(tx, name); err != nil {
 			return err
 		}
 		_, err := r.appendEvent(tx, name, Lifecycle{Kind: Stopped})

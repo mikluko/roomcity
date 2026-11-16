@@ -694,3 +694,39 @@ func TestStopClosesTheRecordOfEveryOwnersPromptThatWaitsAndOnlyThose(t *testing.
 	require.Equal(t, session.Prompt{Seq: closed[0].Seq, Source: session.FromOwner, Text: "waits", State: session.Dropped, Of: waits}, closed[0])
 	require.NotEqual(t, first, closed[0].Of)
 }
+
+func TestAStartAfreshAndAnEndCloseTheRecordsOfTheOwnersPromptsThatWaited(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	dropped := func(name string) []string {
+		evs, err := r.Tail(ctx, name, 100)
+		require.NoError(t, err)
+		var texts []string
+		for _, e := range evs {
+			if p, ok := e.(session.Prompt); ok && p.State == session.Dropped {
+				texts = append(texts, p.Text)
+			}
+		}
+		return texts
+	}
+
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "waits for the start"})
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "gc's, which is dropped as well, and has no record to close")
+	require.NoError(t, err)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	require.Equal(t, []string{"waits for the start"}, dropped("s"))
+
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "waits for the end"})
+	require.NoError(t, err)
+	require.NoError(t, r.End(ctx, "s"))
+	require.Equal(t, []string{"waits for the start", "waits for the end"}, dropped("s"))
+
+	// The first start of a name has nothing to drop.
+	_, err = r.Start(ctx, "new", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	require.Empty(t, dropped("new"))
+}

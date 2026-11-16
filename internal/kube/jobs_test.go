@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"sarak.sh/mikluko/roomcity/internal/kube"
@@ -204,4 +205,53 @@ func TestNamesThatCollapseToTheSameStemStayApart(t *testing.T) {
 	list, err := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 2)
+}
+
+func TestInfoListAndDeleteObjectDescribeAndDeleteTheExactJob(t *testing.T) {
+	ctx := context.Background()
+	jobs, c := newJobs()
+	for _, s := range []string{"a-1", "b-1"} {
+		require.NoError(t, jobs.Create(ctx, operate.JobSpec{Session: s, WorkDir: "/w"}))
+	}
+	// The fake cluster makes no UIDs; the real one does, and a Job that
+	// ends has a condition.
+	list, err := c.BatchV1().Jobs("sandbox").List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	for _, j := range list.Items {
+		j.UID = types.UID("uid-" + j.Annotations["roomcity.sarak.sh/session"])
+		if j.Annotations["roomcity.sarak.sh/session"] == "b-1" {
+			j.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue}}
+		}
+		_, err := c.BatchV1().Jobs("sandbox").Update(ctx, &j, metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+
+	in, held, err := jobs.Info(ctx, "a-1")
+	require.NoError(t, err)
+	require.True(t, held)
+	require.Equal(t, "uid-a-1", in.ID)
+	require.True(t, in.Alive)
+	in, held, err = jobs.Info(ctx, "b-1")
+	require.NoError(t, err)
+	require.True(t, held)
+	require.False(t, in.Alive, "a failed Job is held and not alive")
+	_, held, err = jobs.Info(ctx, "nope")
+	require.NoError(t, err)
+	require.False(t, held)
+
+	all, err := jobs.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+
+	deleted, err := jobs.DeleteObject(ctx, "a-1", "uid-other")
+	require.NoError(t, err)
+	require.False(t, deleted, "another object's id")
+	_, held, _ = jobs.Info(ctx, "a-1")
+	require.True(t, held)
+	deleted, err = jobs.DeleteObject(ctx, "a-1", "uid-a-1")
+	require.NoError(t, err)
+	require.True(t, deleted)
+	deleted, err = jobs.DeleteObject(ctx, "a-1", "uid-a-1")
+	require.NoError(t, err)
+	require.False(t, deleted, "gone")
 }

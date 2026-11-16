@@ -47,6 +47,14 @@ type Jobs interface {
 	Alive(ctx context.Context, session string) (bool, error)
 	// Running lists the sessions that have a Job whose pod has not ended.
 	Running(ctx context.Context) ([]string, error)
+	// Info describes the session's Job, live or dead, and reports whether
+	// there is one.
+	Info(ctx context.Context, session string) (JobInfo, bool, error)
+	// List describes every session's Job, live or dead, with one read.
+	List(ctx context.Context) ([]JobInfo, error)
+	// DeleteObject deletes the session's Job if it is the one with that id,
+	// and reports whether it did.
+	DeleteObject(ctx context.Context, session, id string) (bool, error)
 }
 
 // JobSpec is what a session's Job is made from.
@@ -96,6 +104,10 @@ type Processes interface {
 	Running() []string
 	// Tail returns the last lines of the process's output.
 	Tail(name string, lines int) []string
+	// Info describes the process held under the name, live or dead.
+	Info(name string) procs.Info
+	// Held lists the names that hold a process, live or dead.
+	Held() []string
 }
 
 // Operator implements roomcityv1connect.RuntimeServiceHandler. It trusts its
@@ -107,9 +119,10 @@ type Processes interface {
 // pod lives, whether or not its host is attached at the moment: a restart of
 // the server must not make gc start a session that is still up.
 type Operator struct {
-	reg  *session.Registry
-	jobs Jobs
-	cfg  Config
+	reg    *session.Registry
+	jobs   Jobs
+	cfg    Config
+	byName locks
 }
 
 var _ roomcityv1connect.RuntimeServiceHandler = (*Operator)(nil)
@@ -174,11 +187,13 @@ func (o *Operator) run(ctx context.Context, m *roomcityv1.OperateRequest) result
 		if r := needName(); r != nil {
 			return *r
 		}
+		defer o.byName.lock(name)()
 		return o.start(ctx, name, m.Stdin)
 	case "stop":
 		if r := needName(); r != nil {
 			return *r
 		}
+		defer o.byName.lock(name)()
 		return o.stop(ctx, name)
 	case "is-running":
 		if r := needName(); r != nil {
@@ -219,6 +234,20 @@ func (o *Operator) run(ctx context.Context, m *roomcityv1.OperateRequest) result
 		return o.meta(ctx, m.Operation, name, args[1], m.Stdin)
 	case "protocol":
 		return protocol()
+	case "observe":
+		if r := needName(); r != nil {
+			return *r
+		}
+		defer o.byName.lock(name)()
+		return o.observe(ctx, name, m.Stdin)
+	case "inventory":
+		return o.inventory(ctx)
+	case "kill-object":
+		if r := needName(); r != nil {
+			return *r
+		}
+		defer o.byName.lock(name)()
+		return o.killObject(ctx, name, m.Stdin)
 	case "peek":
 		if r := needName(); r != nil {
 			return *r
@@ -343,6 +372,15 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	sc, err := parseStartConfig(stdin)
 	if err != nil {
 		return failf("start %s: %v", name, err)
+	}
+	if sc.FreshOnly {
+		// gc asks for a box that is new: any box that holds the name, live
+		// or dead, is a refusal, and nothing is touched.
+		if _, held, err := o.find(ctx, name); err != nil {
+			return failf("start %s: %v", name, err)
+		} else if held {
+			return result{err: fmt.Errorf("start %s: session already exists", name), code: exitHeld}
+		}
 	}
 	if alive, err := o.alive(ctx, name); err != nil {
 		return failf("start %s: %v", name, err)

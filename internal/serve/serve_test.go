@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -30,12 +31,19 @@ import (
 type jobs struct {
 	mu    sync.Mutex
 	alive map[string]bool
+	ids   map[string]string
+	n     int
 	fn    func(operate.JobSpec)
 }
 
 func (j *jobs) Create(_ context.Context, s operate.JobSpec) error {
 	j.mu.Lock()
 	j.alive[s.Session] = true
+	j.n++
+	if j.ids == nil {
+		j.ids = map[string]string{}
+	}
+	j.ids[s.Session] = fmt.Sprintf("uid-%d", j.n)
 	j.mu.Unlock()
 	go j.fn(s)
 	return nil
@@ -225,4 +233,39 @@ image = "roomcity"
 
 	stop()
 	require.NoError(t, <-served)
+}
+
+func (j *jobs) Info(_ context.Context, name string) (operate.JobInfo, bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.info(name)
+}
+
+func (j *jobs) info(name string) (operate.JobInfo, bool, error) {
+	alive, held := j.alive[name]
+	if !held {
+		return operate.JobInfo{}, false, nil
+	}
+	return operate.JobInfo{Session: name, ID: j.ids[name], Created: time.Unix(1700000000, 0), Alive: alive}, true, nil
+}
+
+func (j *jobs) List(context.Context) ([]operate.JobInfo, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var out []operate.JobInfo
+	for name := range j.alive {
+		in, _, _ := j.info(name)
+		out = append(out, in)
+	}
+	return out, nil
+}
+
+func (j *jobs) DeleteObject(_ context.Context, name, id string) (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if _, held := j.alive[name]; !held || j.ids[name] != id {
+		return false, nil
+	}
+	delete(j.alive, name)
+	return true, nil
 }

@@ -49,8 +49,9 @@ type Manager struct {
 }
 
 type proc struct {
-	cmd  *exec.Cmd
-	done chan struct{}
+	cmd     *exec.Cmd
+	done    chan struct{}
+	started time.Time
 }
 
 // ErrExists is returned for a name that has a process running.
@@ -93,7 +94,7 @@ func (m *Manager) Start(name string, spec Spec) error {
 		_ = log.Close()
 		return err
 	}
-	p := &proc{cmd: cmd, done: make(chan struct{})}
+	p := &proc{cmd: cmd, done: make(chan struct{}), started: time.Now()}
 	if m.procs == nil {
 		m.procs = map[string]*proc{}
 	}
@@ -104,6 +105,45 @@ func (m *Manager) Start(name string, spec Spec) error {
 		close(p.done)
 	}()
 	return nil
+}
+
+// Info describes the process of the name, which was started and has not been
+// stopped: the one that ended on its own is held until it is stopped or
+// started again.
+type Info struct {
+	Held    bool
+	Alive   bool
+	PID     int
+	Started time.Time
+}
+
+// Info returns what the Manager holds under name.
+func (m *Manager) Info(name string) Info {
+	m.mu.Lock()
+	p, ok := m.procs[name]
+	m.mu.Unlock()
+	if !ok {
+		return Info{}
+	}
+	in := Info{Held: true, PID: p.cmd.Process.Pid, Started: p.started}
+	select {
+	case <-p.done:
+	default:
+		in.Alive = true
+	}
+	return in
+}
+
+// Held lists the names that hold a process, live or dead, sorted.
+func (m *Manager) Held() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	names := make([]string, 0, len(m.procs))
+	for n := range m.procs {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // Alive reports whether a process runs under name.

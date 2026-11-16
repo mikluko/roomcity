@@ -43,6 +43,9 @@ type startConfig struct {
 	PackOverlayDirs    []string          `json:"pack_overlay_dirs,omitempty"`
 	OverlayDir         string            `json:"overlay_dir,omitempty"`
 	CopyFiles          []copyEntry       `json:"copy_files,omitempty"`
+	// FreshOnly asks for a box that is new: a start over a name that any box
+	// holds, live or dead, is refused.
+	FreshOnly bool `json:"fresh_only,omitempty"`
 }
 
 // notCarriedOutForAProcess names what the start config holds that the start

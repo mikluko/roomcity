@@ -107,10 +107,11 @@ func TestRawIsTheStreamAsItWasOneJSONMessageALine(t *testing.T) {
 		require.EqualValues(t, i+1, l["seq"], "in order, from 1")
 		types = append(types, l["type"].(string))
 	}
-	require.Equal(t, []string{"lifecycle", "prompt", "frame", "frame", "frame", "frame", "frame", "lifecycle"}, types)
+	// The prompt was never delivered: the end closes its record.
+	require.Equal(t, []string{"lifecycle", "prompt", "frame", "frame", "frame", "frame", "frame", "prompt", "lifecycle"}, types)
 	require.Equal(t, "to_agent", lines[2]["direction"])
 	require.Equal(t, map[string]any{"jsonrpc": "2.0", "id": float64(1), "result": map[string]any{"stopReason": "end_turn"}}, lines[6]["message"])
-	require.Equal(t, "stopped", lines[7]["kind"])
+	require.Equal(t, "stopped", lines[8]["kind"])
 }
 
 func TestPageSaysSoForASessionThatIsNotThere(t *testing.T) {

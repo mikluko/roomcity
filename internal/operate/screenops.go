@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ const readyPromptMark = "GC_READY_PROMPT_PREFIX"
 // clear-scrollback) and has an idle boundary, which gc reads from the screen
 // peek returns; it reports when the stream last moved, and answers that
 // nobody is attached.
-var capabilities = []string{"carrier.ops", "idle-boundary", "report-activity", "report-attachment"}
+var capabilities = []string{"carrier.ops", "idle-boundary", "observe.v1", "report-activity", "report-attachment"}
 
 // protocol answers gc's handshake.
 func protocol() result {
@@ -51,7 +52,14 @@ func (o *Operator) peek(ctx context.Context, name, lines string) result {
 		}
 		n = v
 	}
-	if o.isProcess(name) {
+	b, held, err := o.find(ctx, name)
+	if err != nil {
+		return failf("peek %s: %v", name, err)
+	}
+	if !held {
+		return result{err: fmt.Errorf("peek %s: no box holds the name", name), code: exitNoScreen}
+	}
+	if b.process {
 		return ok(strings.Join(o.cfg.Processes.Tail(name, n), "\n"))
 	}
 	if _, err := o.reg.Get(ctx, name); err != nil {

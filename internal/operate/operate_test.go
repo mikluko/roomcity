@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -52,16 +54,22 @@ func recording(t *testing.T) []session.HostFrame {
 type fakeJobs struct {
 	mu       sync.Mutex
 	alive    map[string]bool
+	ids      map[string]string
+	n        int
 	created  []operate.JobSpec
 	deleted  []string
 	onCreate func(operate.JobSpec)
 }
 
-func newFakeJobs() *fakeJobs { return &fakeJobs{alive: map[string]bool{}} }
+func newFakeJobs() *fakeJobs {
+	return &fakeJobs{alive: map[string]bool{}, ids: map[string]string{}}
+}
 
 func (j *fakeJobs) Create(_ context.Context, spec operate.JobSpec) error {
 	j.mu.Lock()
 	j.alive[spec.Session] = true
+	j.n++
+	j.ids[spec.Session] = fmt.Sprintf("uid-%d", j.n)
 	j.created = append(j.created, spec)
 	f := j.onCreate
 	j.mu.Unlock()
@@ -377,7 +385,7 @@ func TestTheHandshakeDeclaresWhatTheRuntimeDoes(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(r.Stdout, &hs))
 	require.Zero(t, hs.Version)
-	require.ElementsMatch(t, []string{"carrier.ops", "idle-boundary", "report-activity", "report-attachment"}, hs.Capabilities)
+	require.ElementsMatch(t, []string{"carrier.ops", "idle-boundary", "observe.v1", "report-activity", "report-attachment"}, hs.Capabilities)
 }
 
 // startWithFrames starts a session whose pod reports no frames of its own but
@@ -426,7 +434,7 @@ func TestPeekShowsTheScreenAndItsLastLineSaysWhetherATurnRuns(t *testing.T) {
 
 	one := string(f.do("peek", "", "w-1", "1").Stdout)
 	require.Equal(t, "$ ", one)
-	require.Equal(t, int32(1), f.do("peek", "", "nobody", "5").ExitCode)
+	require.Equal(t, int32(66), f.do("peek", "", "nobody", "5").ExitCode, "no box holds the name: no screen")
 	require.Equal(t, int32(1), f.do("peek", "", "w-1", "many").ExitCode)
 }
 
@@ -574,4 +582,209 @@ func requireInterrupt(t *testing.T, i session.Instruction) {
 	t.Helper()
 	require.Equal(t, session.InstructionCancel, i.Kind)
 	require.True(t, i.KeepWaiting, "gc's interrupt keeps what waits")
+}
+
+func (j *fakeJobs) Info(_ context.Context, name string) (operate.JobInfo, bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.info(name)
+}
+
+func (j *fakeJobs) info(name string) (operate.JobInfo, bool, error) {
+	alive, held := j.alive[name]
+	if !held {
+		return operate.JobInfo{}, false, nil
+	}
+	return operate.JobInfo{Session: name, ID: j.ids[name], Created: time.Unix(1700000000, 0), Alive: alive}, true, nil
+}
+
+func (j *fakeJobs) List(context.Context) ([]operate.JobInfo, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var out []operate.JobInfo
+	for name := range j.alive {
+		in, _, _ := j.info(name)
+		out = append(out, in)
+	}
+	return out, nil
+}
+
+func (j *fakeJobs) DeleteObject(_ context.Context, name, id string) (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if _, held := j.alive[name]; !held || j.ids[name] != id {
+		return false, nil
+	}
+	delete(j.alive, name)
+	return true, nil
+}
+
+// observed is observe's answer.
+type observed struct {
+	State    string            `json:"state"`
+	Object   map[string]string `json:"object"`
+	Agent    string            `json:"agent"`
+	AgentPID string            `json:"agent_pid"`
+	Identity map[string]string `json:"identity"`
+}
+
+func observe(t *testing.T, f *fixture, name string, names ...string) observed {
+	t.Helper()
+	r := f.do("observe", strings.Join(names, "\n"), name)
+	require.Zero(t, r.ExitCode, string(r.Stderr))
+	var o observed
+	require.NoError(t, json.Unmarshal(r.Stdout, &o))
+	return o
+}
+
+func TestObserveSaysWhatHoldsTheName(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	require.Equal(t, "absent", observe(t, f, "w-1").State)
+
+	startRunning(t, f, "w-1")
+	o := observe(t, f, "w-1", "claude")
+	require.Equal(t, "running", o.State)
+	require.Equal(t, map[string]string{"id": "uid-1", "created": "2023-11-14T22:13:20Z"}, o.Object)
+	require.Equal(t, "alive", o.Agent, "the agent runs the program the start staged")
+	require.Equal(t, map[string]string{"GC_SESSION_ID": "gc-7", "GC_INSTANCE_TOKEN": "", "GT_PROCESS_NAMES": ""}["GC_SESSION_ID"], o.Identity["GC_SESSION_ID"])
+	require.Equal(t, o.Object, observe(t, f, "w-1").Object, "the same box is the same object")
+
+	require.Equal(t, "dead", observe(t, f, "w-1", "gc-rpp-no-such-process").Agent)
+	require.Equal(t, "unknown", observe(t, f, "w-1").Agent, "no names asked, no verdict")
+
+	// The pod is lost: the Job is held and nothing runs in it.
+	f.jobs.mu.Lock()
+	f.jobs.alive["w-1"] = false
+	f.jobs.mu.Unlock()
+	d := observe(t, f, "w-1", "claude")
+	require.Equal(t, "dead", d.State)
+	require.Equal(t, o.Object, d.Object)
+	require.Empty(t, d.Agent)
+
+	require.Zero(t, f.do("stop", "", "w-1").ExitCode)
+	require.Equal(t, "absent", observe(t, f, "w-1").State)
+}
+
+func TestAFreshOnlyStartOverAHeldNameIsRefusedAndTouchesNothing(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+	before := observe(t, f, "w-1")
+
+	fresh := f.startConfig(map[string]any{"fresh_only": true})
+	r := f.do("start", fresh, "w-1")
+	require.Equal(t, int32(73), r.ExitCode)
+	require.Contains(t, string(r.Stderr), "already exists")
+	require.Equal(t, before, observe(t, f, "w-1"))
+
+	// A box that is dead holds the name as well.
+	f.jobs.mu.Lock()
+	f.jobs.alive["w-1"] = false
+	f.jobs.mu.Unlock()
+	require.Equal(t, int32(73), f.do("start", fresh, "w-1").ExitCode)
+	require.Zero(t, f.do("start", f.startConfig(map[string]any{"nudge": ""}), "w-1").ExitCode, "not fresh_only: the dead box is replaced")
+	require.NotEqual(t, before.Object["id"], observe(t, f, "w-1").Object["id"], "by another object")
+}
+
+func TestInventoryListsEveryBoxWithItsObjectIdentityAndActivity(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	var empty struct {
+		Complete bool              `json:"complete"`
+		Sessions []json.RawMessage `json:"sessions"`
+	}
+	r := f.do("inventory", "")
+	require.Zero(t, r.ExitCode)
+	require.NoError(t, json.Unmarshal(r.Stdout, &empty))
+	require.True(t, empty.Complete)
+	require.Empty(t, empty.Sessions)
+
+	startRunning(t, f, "w-1")
+	require.Zero(t, f.do("set-meta", "1", "w-1", "GC_RESTART_REQUESTED").ExitCode)
+	startRunning(t, f, "w-2")
+	f.jobs.mu.Lock()
+	f.jobs.alive["w-2"] = false
+	f.jobs.mu.Unlock()
+
+	r = f.do("inventory", "")
+	require.Zero(t, r.ExitCode, string(r.Stderr))
+	var inv struct {
+		Complete bool `json:"complete"`
+		Sessions []struct {
+			Name             string            `json:"name"`
+			State            string            `json:"state"`
+			Object           map[string]string `json:"object"`
+			Attached         *bool             `json:"attached"`
+			LastActivity     string            `json:"last_activity"`
+			RestartRequested bool              `json:"restart_requested"`
+			Identity         map[string]string `json:"identity"`
+		} `json:"sessions"`
+	}
+	require.NoError(t, json.Unmarshal(r.Stdout, &inv))
+	require.True(t, inv.Complete)
+	require.Len(t, inv.Sessions, 2)
+	by := map[string]int{}
+	for i, s := range inv.Sessions {
+		by[s.Name] = i
+	}
+	one, two := inv.Sessions[by["w-1"]], inv.Sessions[by["w-2"]]
+	require.Equal(t, "running", one.State)
+	require.NotEmpty(t, one.LastActivity, "a running session has an activity")
+	require.True(t, one.RestartRequested)
+	require.False(t, *one.Attached)
+	require.Equal(t, "gc-7", one.Identity["GC_SESSION_ID"])
+	require.Equal(t, "dead", two.State)
+	require.Empty(t, two.LastActivity)
+	require.False(t, two.RestartRequested)
+}
+
+func TestKillObjectKillsOnlyTheExactObjectAfterItsRecheck(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	startRunning(t, f, "w-1")
+	cur := observe(t, f, "w-1").Object
+	kill := func(id, created, mode string) string {
+		body, err := json.Marshal(map[string]any{"object": map[string]string{"id": id, "created": created}, "mode": mode})
+		require.NoError(t, err)
+		r := f.do("kill-object", string(body), "w-1")
+		require.Zero(t, r.ExitCode, string(r.Stderr))
+		return string(r.Stdout)
+	}
+
+	require.Equal(t, "gone", kill("uid-0", cur["created"], "corpse"), "another object")
+	require.Equal(t, "gone", kill(cur["id"], "2001-01-01T00:00:00Z", "zombie"), "created at another time")
+	require.Equal(t, "live", kill(cur["id"], cur["created"], "corpse"), "something runs in it")
+	require.Equal(t, "changed", kill(cur["id"], cur["created"], "zombie"), "its agent lives as far as the server can tell")
+	require.Equal(t, "running", observe(t, f, "w-1").State)
+
+	// The pod is lost: a corpse is killed, and the name is free.
+	f.jobs.mu.Lock()
+	f.jobs.alive["w-1"] = false
+	f.jobs.mu.Unlock()
+	require.Equal(t, "killed", kill(cur["id"], cur["created"], "corpse"))
+	require.Equal(t, "absent", observe(t, f, "w-1").State)
+	require.Equal(t, "gone", kill(cur["id"], cur["created"], "corpse"))
+
+	r := f.do("kill-object", "not json", "w-1")
+	require.Equal(t, int32(1), r.ExitCode)
+}
+
+func TestAServiceProcessIsABoxWithAPidAndItsAgentIsReadFromTheProcessTable(t *testing.T) {
+	if exec.Command("ps", "-ww", "-eo", "pid=,ppid=,args=").Run() != nil {
+		t.Skip("the process table cannot be read here")
+	}
+	m := &procs.Manager{LogDir: filepath.Join(t.TempDir(), "logs"), Grace: 500 * time.Millisecond}
+	f := newFixture(t, operate.Config{Processes: m, IsProcess: func(string) bool { return true }})
+	require.Zero(t, f.do("start", f.startConfig(map[string]any{"command": "exec sleep 30", "work_dir": f.dir}), "svc-1").ExitCode)
+
+	o := observe(t, f, "svc-1", "sleep")
+	require.Equal(t, "running", o.State)
+	require.NotEmpty(t, o.AgentPID)
+	require.True(t, strings.HasPrefix(o.Object["id"], "p"))
+	require.Equal(t, "alive", o.Agent)
+	require.Equal(t, "dead", observe(t, f, "svc-1", "gc-rpp-no-such-process").Agent)
+
+	body, err := json.Marshal(map[string]any{"object": o.Object, "mode": "zombie", "agent_pid": o.AgentPID})
+	require.NoError(t, err)
+	require.Equal(t, "changed", string(f.do("kill-object", string(body), "svc-1").Stdout), "its agent lives")
+
+	require.Zero(t, f.do("stop", "", "svc-1").ExitCode)
+	require.Equal(t, "absent", observe(t, f, "svc-1").State)
 }
