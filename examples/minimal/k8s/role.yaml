@@ -1,5 +1,7 @@
-# The server's right over the sessions' Jobs and pods, in the namespace of the
-# city and nowhere else: a Role, not a ClusterRole. The environment of each
+# The server's right over the sessions' Jobs, in the namespace of the city and
+# nowhere else: a Role, not a ClusterRole. It makes, reads, lists and deletes
+# Jobs, lists their pods and reads their logs; the Job controller makes the
+# pods, so the server needs no right to make or delete one. The environment of each
 # session's pod is a Secret the server makes, owns by the Job and deletes with
 # it; the server may make, replace and delete Secrets and not read or list any.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -9,10 +11,10 @@ metadata:
 rules:
   - apiGroups: [batch]
     resources: [jobs]
-    verbs: [create, delete, get, list, watch]
+    verbs: [create, delete, get, list]
   - apiGroups: [""]
     resources: [pods]
-    verbs: [create, delete, get, list, watch]
+    verbs: [list]
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]

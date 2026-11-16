@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -108,4 +109,48 @@ func TestTheExamplesImageIsTheNewestRelease(t *testing.T) {
 
 	require.Equal(t, "sarak.sh/mikluko/roomcity:"+newestRelease(t, log), cfg.Kube.Image,
 		"examples/minimal names the image of the newest release in CHANGELOG.md: move it in the release's pull request")
+}
+
+// admits says whether a caret range such as "^0.4" admits the version: below
+// 1.0 a caret holds the minor, from 1.0 on it holds the major.
+func admits(t *testing.T, rng, version string) bool {
+	t.Helper()
+	var rmaj, rmin, vmaj, vmin, vpat int
+	_, err := fmt.Sscanf(rng, "^%d.%d", &rmaj, &rmin)
+	require.NoError(t, err, "range %q", rng)
+	_, err = fmt.Sscanf(version, "%d.%d.%d", &vmaj, &vmin, &vpat)
+	require.NoError(t, err, "version %q", version)
+	if rmaj == 0 {
+		return vmaj == 0 && vmin == rmin
+	}
+	return vmaj == rmaj && vmin >= rmin
+}
+
+func TestAdmitsReadsACaretRange(t *testing.T) {
+	require.True(t, admits(t, "^0.4", "0.4.7"))
+	require.False(t, admits(t, "^0.3", "0.4.0"))
+	require.True(t, admits(t, "^1.2", "1.9.0"))
+	require.False(t, admits(t, "^1.2", "2.0.0"))
+}
+
+// The example imports the pack of the release it names: its range admits the
+// newest release in CHANGELOG.md, as the image does. A pack of an earlier minor
+// is not taken to serve a newer server; what the pack holds is one runtime
+// declaration, but the range is how the two are kept together.
+func TestTheExamplesPackRangeAdmitsTheNewestRelease(t *testing.T) {
+	log, err := os.ReadFile("../../CHANGELOG.md")
+	require.NoError(t, err)
+	b, err := os.ReadFile(filepath.Join(example, "city/pack.toml"))
+	require.NoError(t, err)
+	var pack struct {
+		Imports map[string]struct {
+			Version string `toml:"version"`
+		} `toml:"imports"`
+	}
+	require.NoError(t, toml.Unmarshal(b, &pack))
+	rng := pack.Imports["roomcity"].Version
+	release := newestRelease(t, log)
+
+	require.True(t, admits(t, rng, release),
+		"examples/minimal/city/pack.toml imports the pack as %s, which does not admit the newest release %s: move the range in the release's pull request", rng, release)
 }

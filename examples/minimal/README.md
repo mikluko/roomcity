@@ -31,10 +31,11 @@ three containers:
 - `oauth2-proxy` is the only way to the transcripts page, which the server
   serves on a loopback port of its own.
 
-Besides them: the ServiceAccount and the Role that lets the server create and
-delete Jobs and pods in its namespace and nowhere else, read a pod's log, and
-create, update and delete Secrets, which hold each session's environment, but
-read none; the Service that sessions and the homeserver reach the server at, the
+Besides them: the ServiceAccount and the Role that lets the server create, get,
+list and delete Jobs, list their pods and read their logs, and create, update
+and delete Secrets, which hold each session's environment, but read none, in its
+namespace and nowhere else (the Job controller makes the pods, and nothing
+watches); the Service that sessions and the homeserver reach the server at, the
 Service and the Ingress of the page, and a NetworkPolicy that lets only the
 namespace's pods and the homeserver reach the server, and only the ingress
 controller reach the proxy.
@@ -73,6 +74,16 @@ controller reach the proxy.
 | the labels and namespace of the homeserver and of the ingress controller | `k8s/network-policy.yaml` | those of your cluster |
 | `storageClassName` | `k8s/statefulset.yaml` | a class of your cluster, or leave it out for the default |
 | the image tag, `sarak.sh/mikluko/roomcity:<version>` | `k8s/statefulset.yaml`, `k8s/files/roomcity.toml` | the release you run; the pod and `kube.image` must name the same |
+| the pack's range, `version` of `[imports.roomcity]` | `city/pack.toml` | the minor of the release you run: a caret below 1.0 holds the minor, and the pack and the image of one release are kept together |
+
+## Where it departs from the deployment
+
+The files are those of the deployment they were taken from, with the names
+replaced by placeholders, and two departures. The pod's `securityContext` has
+`fsGroup: 1000`, which a block volume needs for the pod's user to write it and
+which the deployment's host-path volume ignores. And what is particular to that
+cluster is left out: a node selector and tolerations, a storage class, and the
+annotations that make a certificate and a DNS record from the Ingress.
 
 ## The Secrets
 

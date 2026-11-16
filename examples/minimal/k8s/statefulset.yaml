@@ -22,6 +22,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        # A block volume is made for root; this makes it the group's to write.
+        # (A host path, which local-path-provisioner makes, ignores it.)
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
