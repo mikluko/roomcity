@@ -1,0 +1,349 @@
+package session_test
+
+import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"sarak.sh/mikluko/roomcity/internal/session"
+)
+
+func open(t *testing.T, path string) *session.Registry {
+	t.Helper()
+	r, err := session.Open(context.Background(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	return r
+}
+
+func ctxT(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func recv[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case v, ok := <-ch:
+		require.True(t, ok, "channel closed")
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatal("nothing received")
+		panic("unreachable")
+	}
+}
+
+func TestStartAuthorizesTheLatestTokenOnly(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+
+	first, err := r.Start(ctx, "host-1", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	require.True(t, r.Authorize("host-1", first))
+	require.False(t, r.Authorize("host-1", ""))
+	require.False(t, r.Authorize("other", first))
+
+	second, err := r.Start(ctx, "host-1", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	require.False(t, r.Authorize("host-1", first))
+	require.True(t, r.Authorize("host-1", second))
+}
+
+func TestEventsShareOneNumberingAcrossAStartAfresh(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	at := time.Unix(1700000000, 5)
+	_, err = r.Report(ctx, "s", []session.HostFrame{{Seq: 1, Time: at, Direction: session.FromAgent, Message: []byte(`{"a":1}`)}})
+	require.NoError(t, err)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	evs, err := r.Subscribe(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, session.Lifecycle{Seq: 1, Kind: session.Started}, recv(t, evs))
+	require.Equal(t, session.Frame{Seq: 2, Time: at, Direction: session.FromAgent, Message: []byte(`{"a":1}`)}, recv(t, evs))
+	require.Equal(t, session.Lifecycle{Seq: 3, Kind: session.StartedAfresh}, recv(t, evs))
+}
+
+func TestSubscribeFromAndFromNow(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Report(ctx, "s", []session.HostFrame{
+		{Seq: 1, Direction: session.ToAgent, Message: []byte("1")},
+		{Seq: 2, Direction: session.FromAgent, Message: []byte("2")},
+	})
+	require.NoError(t, err)
+
+	evs, err := r.Subscribe(ctx, "s", 2)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), recv(t, evs).Number())
+
+	now, err := r.Subscribe(ctx, "s", session.FromNow)
+	require.NoError(t, err)
+	_, err = r.Report(ctx, "s", []session.HostFrame{{Seq: 3, Direction: session.FromAgent, Message: []byte("3")}})
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), recv(t, now).Number())
+
+	_, err = r.Subscribe(ctx, "nope", 0)
+	require.ErrorIs(t, err, session.ErrNotFound)
+}
+
+func TestReportIsIdempotentOnTheHostsNumbers(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	batch := []session.HostFrame{
+		{Seq: 1, Direction: session.ToAgent, Message: []byte("1")},
+		{Seq: 2, Direction: session.FromAgent, Message: []byte("2")},
+	}
+	last, err := r.Report(ctx, "s", batch)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), last)
+	last, err = r.Report(ctx, "s", append(batch, session.HostFrame{Seq: 3, Direction: session.FromAgent, Message: []byte("3")}))
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), last)
+
+	evs, err := r.Subscribe(ctx, "s", 1)
+	require.NoError(t, err)
+	for want := uint64(2); want <= 4; want++ {
+		require.Equal(t, want, recv(t, evs).Number())
+	}
+}
+
+func TestAgentsAnswerToSessionNewMakesTheSessionRunning(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- r.WaitRunning(ctx, "s") }()
+
+	notRunning := func() {
+		t.Helper()
+		select {
+		case err := <-done:
+			t.Fatalf("running too early: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	report := func(seq uint64, d session.Direction, msg string) {
+		t.Helper()
+		_, err := r.Report(ctx, "s", []session.HostFrame{{Seq: seq, Direction: d, Message: []byte(msg)}})
+		require.NoError(t, err)
+	}
+
+	report(1, session.ToAgent, `{"jsonrpc":"2.0","id":0,"method":"initialize"}`)
+	report(2, session.FromAgent, `{"jsonrpc":"2.0","id":0,"result":{}}`)
+	report(3, session.ToAgent, `{"jsonrpc":"2.0","id":1,"method":"session/new"}`)
+	notRunning()
+	report(4, session.FromAgent, `{"jsonrpc":"2.0","id":1,"error":{"code":-1}}`)
+	notRunning()
+	report(5, session.FromAgent, `{"jsonrpc":"2.0","id":1,"result":{"sessionId":"x"}}`)
+	require.NoError(t, <-done)
+}
+
+func TestAuthorizeRefusesAnEndedSession(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	token, err := r.Start(ctx, "s", "worker", session.Task)
+	require.NoError(t, err)
+	require.True(t, r.Authorize("s", token))
+	require.NoError(t, r.End(ctx, "s"))
+	require.False(t, r.Authorize("s", token))
+}
+
+func TestReportRefusesAFrameThatSkipsANumber(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	_, err = r.Report(ctx, "s", []session.HostFrame{
+		{Seq: 1, Direction: session.ToAgent, Message: []byte("1")},
+		{Seq: 3, Direction: session.ToAgent, Message: []byte("3")},
+	})
+	require.ErrorIs(t, err, session.ErrFrameGap)
+	last, err := r.Report(ctx, "s", nil)
+	require.NoError(t, err)
+	require.Zero(t, last, "nothing of a refused call is stored")
+}
+
+func TestOpenRefusesAnotherSchemaVersion(t *testing.T) {
+	ctx := ctxT(t)
+	path := filepath.Join(t.TempDir(), "r.db")
+	require.NoError(t, open(t, path).Close())
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	require.NoError(t, err)
+	_, err = db.Exec(`PRAGMA user_version = 99`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	_, err = session.Open(ctx, path)
+	require.ErrorContains(t, err, "schema version 99")
+}
+
+func TestInstructionsAtOrBelowAfterAreNoLongerDroppedByCancel(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	for _, text := range []string{"carried out", "waits"} {
+		_, err = r.Prompt(ctx, "s", session.PromptInput{Text: text})
+		require.NoError(t, err)
+	}
+
+	// The host names 1 as carried out; nobody takes 2.
+	attached, cancel := context.WithCancel(ctx)
+	_, err = r.Instructions(attached, "s", 1)
+	require.NoError(t, err)
+	cancel()
+	require.NoError(t, r.Cancel(ctx, "s"))
+
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, "carried out", recv(t, in).Text)
+	require.Equal(t, session.InstructionCancel, recv(t, in).Kind)
+}
+
+func TestNudgeSurvivesARestartBeforeItIsDelivered(t *testing.T) {
+	ctx := ctxT(t)
+	path := filepath.Join(t.TempDir(), "r.db")
+	r := open(t, path)
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	stored, err := r.Nudge(ctx, "s", "wake up")
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+
+	r = open(t, path)
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	got := recv(t, in)
+	require.Equal(t, session.Instruction{Seq: 1, Kind: session.InstructionPrompt, Source: session.FromGC, Text: "wake up"}, got)
+
+	evs, err := r.Subscribe(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, session.Lifecycle{Seq: 1, Kind: session.Started}, recv(t, evs))
+	require.Equal(t, session.Prompt{Seq: stored, Source: session.FromGC, Text: "wake up", State: session.Stored}, recv(t, evs))
+	require.Equal(t, session.Prompt{Seq: 3, Source: session.FromGC, Text: "wake up", State: session.Delivered, Of: stored}, recv(t, evs))
+}
+
+func TestAttachAgainReceivesOnlyTheInstructionsAfterTheLastCarried(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	for _, text := range []string{"a", "b", "c"} {
+		_, err = r.Prompt(ctx, "s", session.PromptInput{Text: text})
+		require.NoError(t, err)
+	}
+
+	in, err := r.Instructions(ctx, "s", 1)
+	require.NoError(t, err)
+	require.Equal(t, "b", recv(t, in).Text)
+	require.Equal(t, "c", recv(t, in).Text)
+
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "d"})
+	require.NoError(t, err)
+	require.Equal(t, "d", recv(t, in).Text)
+}
+
+func TestCancelDropsPromptsNotYetSent(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "waits"})
+	require.NoError(t, err)
+	require.NoError(t, r.Cancel(ctx, "s"))
+	require.NoError(t, r.AnswerPermission(ctx, "s", "7", "allow"))
+
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Equal(t, session.InstructionCancel, recv(t, in).Kind)
+	answer := recv(t, in)
+	require.Equal(t, session.Instruction{Seq: 3, Kind: session.InstructionPermissionAnswer, RequestID: "7", OptionID: "allow"}, answer)
+}
+
+func TestStartAfreshEmptiesTheQueue(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "old")
+	require.NoError(t, err)
+	_, err = r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+	_, err = r.Nudge(ctx, "s", "new")
+	require.NoError(t, err)
+
+	in, err := r.Instructions(ctx, "s", 0)
+	require.NoError(t, err)
+	got := recv(t, in)
+	require.Equal(t, uint64(1), got.Seq)
+	require.Equal(t, "new", got.Text)
+}
+
+func TestInstructionsToAnEndedSessionAreRefused(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Prompt(ctx, "s", session.PromptInput{Text: "x"})
+	require.ErrorIs(t, err, session.ErrNotFound)
+
+	_, err = r.Start(ctx, "s", "worker", session.Task)
+	require.NoError(t, err)
+	require.NoError(t, r.End(ctx, "s"))
+	_, err = r.Prompt(ctx, "s", session.PromptInput{Text: "x"})
+	require.ErrorIs(t, err, session.ErrNotRunning)
+	require.ErrorIs(t, r.WaitRunning(ctx, "s"), session.ErrNotRunning)
+}
+
+func TestWatchReportsCurrentSessionsThenChanges(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "a", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	w, err := r.Watch(ctx)
+	require.NoError(t, err)
+	require.Equal(t, session.Info{Name: "a", Agent: "host", Kind: session.AlwaysOn, State: session.Starting}, recv(t, w))
+
+	_, err = r.Start(ctx, "b", "worker", session.Task)
+	require.NoError(t, err)
+	require.Equal(t, "b", recv(t, w).Name)
+
+	require.NoError(t, r.End(ctx, "a"))
+	require.Equal(t, session.Info{Name: "a", Agent: "host", Kind: session.AlwaysOn, State: session.Ended}, recv(t, w))
+}
+
+func TestReportWithNoFramesReturnsTheStoredNumber(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "host", session.AlwaysOn)
+	require.NoError(t, err)
+
+	last, err := r.Report(ctx, "s", nil)
+	require.NoError(t, err)
+	require.Zero(t, last)
+
+	_, err = r.Report(ctx, "s", []session.HostFrame{{Seq: 1, Direction: session.ToAgent, Message: []byte("1")}})
+	require.NoError(t, err)
+	last, err = r.Report(ctx, "s", nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), last)
+}

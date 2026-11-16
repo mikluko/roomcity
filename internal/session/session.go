@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ErrNotFound is returned for a session the registry does not hold.
@@ -67,7 +68,9 @@ type Event interface {
 
 // Frame is one JSON-RPC message of the ACP stream, as it was on the wire.
 type Frame struct {
-	Seq       uint64
+	Seq uint64
+	// Time is when the frame passed the session host.
+	Time      time.Time
 	Direction Direction
 	Message   []byte
 }
@@ -92,7 +95,8 @@ const (
 	// waits for the turn's end. It is recorded when the server or the host
 	// finds that it must wait, and not for a prompt that goes at once.
 	Waiting
-	// Delivered is a prompt that went to the agent.
+	// Delivered is a prompt the server handed to the session host; what the
+	// host did with it is not reported back.
 	Delivered
 )
 
