@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-16
+
 ### Added
 
 - The server tells a foreman that the task it waits for is closed: `wait(task)` keeps the task in the session's marks, and every ten seconds the server reads the tasks waited for and, for one that is closed, queues a prompt marked as gc's for the session, which an idle session takes as a turn (gc's own `session wait` delivers its reminder at a boundary of the session's own, which an idle one has none of, so it is no longer used). The wait survives a new start of the session. `HostService.Done` takes optional `blocked`, `commit` and `branch` fields, which the host's `done` tool does not offer yet, and records the task as gc's `no-op` (an answer, no commit), `shipped` (with a commit and its branch) or `blocked`.
@@ -207,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.11.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.12.0...HEAD
+[0.12.0]: https://sarak.sh/mikluko/roomcity/compare/v0.11.0...v0.12.0
 [0.11.0]: https://sarak.sh/mikluko/roomcity/compare/v0.10.0...v0.11.0
 [0.10.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.10.0
 [0.9.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.9.0

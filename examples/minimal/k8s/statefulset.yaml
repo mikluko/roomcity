@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gc
-          image: sarak.sh/mikluko/roomcity:0.11.0
+          image: sarak.sh/mikluko/roomcity:0.12.0
           command: [dumb-init, --, sh, /opt/roomcity/start.sh]
           env:
             - name: CITY_NAME
@@ -74,7 +74,7 @@ spec:
               mountPath: /run/roomcity/secrets/dolt
               readOnly: true
         - name: roomcity
-          image: sarak.sh/mikluko/roomcity:0.11.0
+          image: sarak.sh/mikluko/roomcity:0.12.0
           command: [dumb-init, --, roomcity, server]
           env:
             - name: ROOMCITY_CONFIG
