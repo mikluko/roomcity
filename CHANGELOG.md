@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
 ### Added
 
 - `examples/minimal`: `start.sh` brings the city's checkout to the commit `CITY_REVISION` names when it is set, in place of the upstream's head.
@@ -239,7 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.13.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.14.0...HEAD
+[0.14.0]: https://sarak.sh/mikluko/roomcity/compare/v0.13.0...v0.14.0
 [0.13.0]: https://sarak.sh/mikluko/roomcity/compare/v0.12.0...v0.13.0
 [0.12.0]: https://sarak.sh/mikluko/roomcity/compare/v0.11.0...v0.12.0
 [0.11.0]: https://sarak.sh/mikluko/roomcity/compare/v0.10.0...v0.11.0
