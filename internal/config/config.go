@@ -90,20 +90,7 @@ func (c Config) AgentSecrets() map[string][]kube.Secret {
 }
 
 // Duration is a time.Duration written as a string, such as "100s".
-type Duration time.Duration
-
-// UnmarshalText reads a duration as time.ParseDuration does.
-func (d *Duration) UnmarshalText(b []byte) error {
-	v, err := time.ParseDuration(string(b))
-	if err != nil {
-		return err
-	}
-	*d = Duration(v)
-	return nil
-}
-
-// Duration returns d as a time.Duration.
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
+type Duration = chat.Duration
 
 // Defaults of the keys the file may leave out.
 const (

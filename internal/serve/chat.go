@@ -55,6 +55,7 @@ func newChatSide(cfg config.Config, reg *session.Registry, log *slog.Logger) (*c
 			Log:         log,
 			City:        name,
 			Transcripts: cfg.Chat.Transcripts,
+			CatchUp:     cfg.Chat.CatchUpWindow(),
 		},
 	}, nil
 }

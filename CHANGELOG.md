@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `[chat] catch_up`, a duration such as `"1h"` (default one hour): how old an event may be and still be shown when a room is brought up to date after an outage. What is older is left out, and the room says so in one notice that links the session's transcript.
+
+### Changed
+
+- The chat side keeps, for each session, how far it has shown the stream, in the registry, and takes the stream up from there: a new session is shown from its first event (its role prompt, "From gc", included, which a subscription "from now" could miss), a session that was shown before a restart is not shown again, and what a session said while the homeserver could not be reached is shown when it is back, and is not counted as shown before. The record is the event before the oldest text still held back unsent (an answer's paragraph, thoughts, a plan's edit), so a restart in the middle of a paragraph shows that paragraph again and nothing before it; a message that does not reach the room because the homeserver is out of reach ends the reading, which is begun again from the record after a pause of five seconds, while one that the homeserver refuses for itself (a reaction it already holds) is logged and left out. A tool notice and a permission request are not sent before the plan's edit that waits. A room that stays out of reach is logged once when it goes, once a minute while it stays, and once when it is back.
+
 ## [0.7.0] - 2026-11-16
 
 ### Added

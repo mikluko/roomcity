@@ -63,6 +63,16 @@ Two limits, from the server's not being able to read or list Secrets:
 - A server that dies between making a session's Secret and making its Job leaves a Secret that nothing owns. The server cannot list Secrets to find it; the next start of the same session overwrites it and a stop of that name deletes it, and otherwise it stays until someone deletes it.
 - Starts of one name are serialized by the server and only the server makes a session's Job, so a Job that appears between the start's check for one and its own creation, made by hand, would find its Secret overwritten.
 
+## What a restart shows in a room
+
+The registry keeps, for each session, how far its room has been shown (`shown`), and the chat side takes the stream up from there when the server starts again or the room comes back from an outage. The record is the last event after which nothing was held back unsent: a restart in the middle of an answer shows the paragraph that was being written again, and the thoughts or the plan's edit that were being held, and nothing before them. What happened more than `[chat] catch_up` ago (an hour by default) is not shown, and the room says so in one notice that links the transcript.
+
+A message that the chat system refuses for itself, as a reaction it already holds, is logged and left out. A homeserver that cannot be reached is not given up on: what could not be sent is sent when it is back. That includes a homeserver that does not know the application service (it answers `M_UNKNOWN_TOKEN` to everything, as one does that came up without its registration): nothing is counted as shown until it does.
+
+Two things that come after text that is held back are behind the kept position, and come again after a restart there: a tool result (an update of a tool call does not end the answer's paragraph) and gc's "From gc" notice of a nudge that arrives in the middle of a paragraph.
+
+A permission request that is open when the server restarts cannot be answered from the room afterwards: the reactions on its message are ignored, since the options of the request are kept in the server's memory only.
+
 ## The database and its upgrades
 
 The server keeps the sessions, their events, their queues and the transcripts in one SQLite database, `roomcity.db` in `[server] data`, and its layout has a version (`PRAGMA user_version`).

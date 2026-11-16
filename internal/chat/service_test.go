@@ -50,6 +50,24 @@ type fakeDriver struct {
 	undone    []chat.ReactionID
 	// failures is how many calls of EnsureRoom fail before one succeeds.
 	failures int
+	// down makes Send and React fail, as a homeserver that is out of reach does.
+	down bool
+	// refuse is the body of a message that the homeserver refuses for itself,
+	// failBody that of one it cannot take now: it is out of reach for it.
+	refuse   string
+	failBody string
+}
+
+func (d *fakeDriver) setFailBody(body string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.failBody = body
+}
+
+func (d *fakeDriver) setDown(down bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.down = down
 }
 
 func newFakeDriver() *fakeDriver {
@@ -116,6 +134,15 @@ func (d *fakeDriver) Link(room chat.RoomID) string { return "link:" + string(roo
 func (d *fakeDriver) Send(_ context.Context, room chat.RoomID, speaker string, msg chat.Message) (chat.MessageID, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.down {
+		return "", errors.New("the homeserver is out of reach")
+	}
+	if d.failBody != "" && msg.Body == d.failBody {
+		return "", errors.New("the homeserver is out of reach")
+	}
+	if d.refuse != "" && msg.Body == d.refuse {
+		return "", chat.Refused(errors.New("M_FORBIDDEN"))
+	}
 	d.sent = append(d.sent, sent{room, speaker, msg})
 	return chat.MessageID("$" + msg.Body), nil
 }
@@ -123,6 +150,9 @@ func (d *fakeDriver) Send(_ context.Context, room chat.RoomID, speaker string, m
 func (d *fakeDriver) React(_ context.Context, _ chat.RoomID, _ string, to chat.MessageID, key string) (chat.ReactionID, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.down {
+		return "", errors.New("the homeserver is out of reach")
+	}
 	d.reactions = append(d.reactions, reaction{to, key})
 	return chat.ReactionID(fmt.Sprintf("r%d", len(d.reactions))), nil
 }
@@ -225,7 +255,7 @@ func runService(t *testing.T, sessions *chattest.Sessions) (*fakeDriver, func(ch
 	return runServiceWith(t, sessions, newFakeDriver())
 }
 
-func runServiceWith(t *testing.T, sessions *chattest.Sessions, driver *fakeDriver) (*fakeDriver, func(chat.Incoming)) {
+func runServiceWith(t *testing.T, sessions *chattest.Sessions, driver *fakeDriver, options ...func(*chat.Service)) (*fakeDriver, func(chat.Incoming)) {
 	t.Helper()
 	svc := &chat.Service{
 		Driver:   driver,
@@ -236,6 +266,9 @@ func runServiceWith(t *testing.T, sessions *chattest.Sessions, driver *fakeDrive
 		City:        "testcity",
 		Transcripts: "https://t/-/",
 		RetryEvery:  10 * time.Millisecond,
+	}
+	for _, option := range options {
+		option(svc)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)

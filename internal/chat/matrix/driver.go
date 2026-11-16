@@ -4,6 +4,7 @@ package matrix
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/appservice"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -131,7 +133,7 @@ func (d *Driver) Send(ctx context.Context, room chat.RoomID, speaker string, msg
 	}
 	resp, err := intent.SendMessageEvent(ctx, id.RoomID(room), event.EventMessage, &content)
 	if err != nil {
-		return "", fmt.Errorf("sending to %s: %w", room, err)
+		return "", answered(fmt.Errorf("sending to %s: %w", room, err))
 	}
 	return chat.MessageID(resp.EventID), nil
 }
@@ -144,9 +146,29 @@ func (d *Driver) React(ctx context.Context, room chat.RoomID, speaker string, to
 	}
 	resp, err := intent.SendReaction(ctx, id.RoomID(room), id.EventID(to), key)
 	if err != nil {
-		return "", fmt.Errorf("reacting in %s: %w", room, err)
+		return "", answered(fmt.Errorf("reacting in %s: %w", room, err))
 	}
 	return chat.ReactionID(resp.EventID), nil
+}
+
+// answered marks the error of a call as a refusal when the homeserver answered
+// it with an error of the request itself: a status of 4xx, but a rate limit
+// (429) or a timeout (408), which is asked again, and a 401, which is the
+// homeserver not knowing the application service (it reads its registrations
+// at startup) and says nothing of the message. Anything else, the connection
+// that failed or a 5xx, is the homeserver out of reach.
+func answered(err error) error {
+	var httpErr mautrix.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Response == nil {
+		return err
+	}
+	switch code := httpErr.Response.StatusCode; {
+	case code == http.StatusTooManyRequests || code == http.StatusRequestTimeout || code == http.StatusUnauthorized:
+		return err
+	case code >= 400 && code < 500:
+		return chat.Refused(err)
+	}
+	return err
 }
 
 // Unreact implements chat.Driver.

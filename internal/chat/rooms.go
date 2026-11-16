@@ -156,18 +156,8 @@ func (s *Service) startTask(ctx context.Context, wg *sync.WaitGroup, info sessio
 	s.mu.Unlock()
 
 	s.recordRoom(ctx, task.target, info.Name)
-	events, err := s.Sessions.Subscribe(taskCtx, info.Name, session.FromNow)
-	if err != nil {
-		s.Log.Error("subscribing to a session", "session", info.Name, "err", err)
-		cancel()
-		s.mu.Lock()
-		delete(s.by, room)
-		delete(s.tasks, info.Name)
-		s.mu.Unlock()
-		return
-	}
 	wg.Go(func() {
-		s.render(taskCtx, task.target, info.Name, events, func() { s.endTask(ctx, info, task) })
+		s.follow(taskCtx, task.target, info.Name, info.Shown, func() { s.endTask(ctx, info, task) })
 	})
 	if existing == "" {
 		s.journalNotice(ctx, fmt.Sprintf("A session of **%s** started: [%s](%s)", info.Agent, spec.Title, s.Driver.Link(room)))

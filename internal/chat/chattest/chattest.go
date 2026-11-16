@@ -22,7 +22,8 @@ type Sessions struct {
 	infos      []session.Info
 	watch      chan session.Info
 	closeWatch func()
-	events     map[string]chan session.Event
+	log        map[string][]session.Event
+	live       map[string][]*subscription
 	prompts    map[string][]string
 	cancels    map[string]int
 	answers    []PermissionAnswer
@@ -106,21 +107,40 @@ func (s *Sessions) CloseWatch() {
 	closeCh()
 }
 
-// Subscribe implements session.Service. It serves only the events emitted
-// after the call, whatever from says.
-func (s *Sessions) Subscribe(ctx context.Context, name string, _ uint64) (<-chan session.Event, error) {
-	ch := s.channel(name)
+// subscription is one call of Subscribe: its channel and whether it is over.
+type subscription struct {
+	ch   chan session.Event
+	done bool
+}
+
+// Subscribe implements session.Service. It serves the events emitted with a
+// Seq after from, those already emitted first, then those that follow; none of
+// the earlier ones for FromNow.
+func (s *Sessions) Subscribe(ctx context.Context, name string, from uint64) (<-chan session.Event, error) {
+	sub := &subscription{ch: make(chan session.Event, 1024)}
 	s.mu.Lock()
 	if s.subscribed == nil {
 		s.subscribed = map[string]int{}
 	}
 	s.subscribed[name]++
+	if s.live == nil {
+		s.live = map[string][]*subscription{}
+	}
+	for _, ev := range s.log[name] {
+		if from != session.FromNow && ev.Number() > from {
+			sub.ch <- ev
+		}
+	}
+	s.live[name] = append(s.live[name], sub)
 	s.mu.Unlock()
 	go func() {
 		<-ctx.Done()
-		close(ch)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		sub.done = true
+		close(sub.ch)
 	}()
-	return ch, nil
+	return sub.ch, nil
 }
 
 // Prompt implements session.Service.
@@ -248,12 +268,45 @@ func (s *Sessions) Answers() []PermissionAnswer {
 	return append([]PermissionAnswer(nil), s.answers...)
 }
 
-// Emit makes the session produce events.
+// Emit makes the session produce events. One without a Seq is given the next
+// one of its session.
 func (s *Sessions) Emit(name string, events ...session.Event) {
-	ch := s.channel(name)
-	for _, ev := range events {
-		ch <- ev
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.log == nil {
+		s.log = map[string][]session.Event{}
 	}
+	for _, ev := range events {
+		ev = s.numbered(name, ev)
+		s.log[name] = append(s.log[name], ev)
+		for _, sub := range s.live[name] {
+			if !sub.done {
+				sub.ch <- ev
+			}
+		}
+	}
+}
+
+func (s *Sessions) numbered(name string, ev session.Event) session.Event {
+	if ev.Number() != 0 {
+		return ev
+	}
+	next := uint64(1)
+	if l := s.log[name]; len(l) > 0 {
+		next = l[len(l)-1].Number() + 1
+	}
+	switch ev := ev.(type) {
+	case session.Frame:
+		ev.Seq = next
+		return ev
+	case session.Prompt:
+		ev.Seq = next
+		return ev
+	case session.Lifecycle:
+		ev.Seq = next
+		return ev
+	}
+	return ev
 }
 
 // Subscriptions returns how many times the session has been subscribed to.
@@ -268,18 +321,6 @@ func (s *Sessions) Prompts(name string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.prompts[name]...)
-}
-
-func (s *Sessions) channel(name string) chan session.Event {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.events == nil {
-		s.events = map[string]chan session.Event{}
-	}
-	if s.events[name] == nil {
-		s.events[name] = make(chan session.Event, 256)
-	}
-	return s.events[name]
 }
 
 // Recording reads a session recorded as lines of {"dir":"in"|"out","msg":{}},

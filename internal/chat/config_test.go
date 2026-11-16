@@ -2,6 +2,7 @@ package chat
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/require"
@@ -53,4 +54,19 @@ func TestConfigValidate(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
+}
+
+func TestConfigCatchUp(t *testing.T) {
+	var file struct {
+		Chat Config `toml:"chat"`
+	}
+	require.NoError(t, toml.Unmarshal([]byte(sandboxConfig), &file))
+	require.Equal(t, DefaultCatchUp, file.Chat.CatchUpWindow(), "none is the default")
+
+	require.NoError(t, toml.Unmarshal([]byte("[chat]\ncatch_up = \"90m\"\n"), &file))
+	require.NoError(t, file.Chat.Validate())
+	require.Equal(t, 90*time.Minute, file.Chat.CatchUpWindow())
+
+	require.NoError(t, toml.Unmarshal([]byte("[chat]\ncatch_up = \"-1m\"\n"), &file))
+	require.ErrorContains(t, file.Chat.Validate(), "catch_up")
 }

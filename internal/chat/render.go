@@ -60,6 +60,11 @@ type renderer struct {
 	typedAt time.Time
 	// promptID is the id of the request that began the turn, as JSON.
 	promptID string
+	// at is the Seq of the event being handled; the three since-fields are the
+	// Seq of the first event of what is held back unsent: the answer's last
+	// paragraph, the thoughts, and the plan's edit. 0 is nothing held.
+	at                                   uint64
+	answerSince, thoughtSince, planSince uint64
 	// toolLimit and detailLimit are how many bytes of a tool call's output
 	// and of a permission request's detail are shown; 0 shows all.
 	toolLimit, detailLimit int
@@ -94,12 +99,53 @@ func newRenderer(out outbox, now func() time.Time, planGap time.Duration) *rende
 // the open requests as they are: the session may still be running.
 func (r *renderer) drain() {
 	r.endThoughts()
-	r.sendAll(r.answer.flush())
+	r.sendAll(r.flushAnswer())
 	r.finishPlan()
+}
+
+// safe returns the last Seq, of the events handled up to last, after which a
+// restart that takes the stream up shows nothing twice and loses nothing: the
+// one before the oldest event whose text is still held back, or last itself
+// when nothing is. The open tool calls and permission requests do not hold it
+// back, since a result with no start, and an answer to a request the room
+// never saw, are both handled.
+func (r *renderer) safe(last uint64) uint64 {
+	oldest := uint64(0)
+	for _, since := range []uint64{r.answerSince, r.thoughtSince, r.planSince} {
+		if since != 0 && (oldest == 0 || since < oldest) {
+			oldest = since
+		}
+	}
+	if oldest == 0 {
+		return last
+	}
+	return oldest - 1
+}
+
+// feedAnswer gives the event to the answer and returns the paragraphs it
+// completed. What is left of the answer began in this event when the event
+// completed a paragraph, and earlier when it did not.
+func (r *renderer) feedAnswer(ev session.Event) []string {
+	out := r.answer.feed(ev)
+	switch {
+	case r.answer.pending == "":
+		r.answerSince = 0
+	case len(out) > 0 || r.answerSince == 0:
+		r.answerSince = r.at
+	}
+	return out
+}
+
+// flushAnswer returns what is left of the answer, and holds none.
+func (r *renderer) flushAnswer() []string {
+	out := r.answer.flush()
+	r.answerSince = 0
+	return out
 }
 
 // event takes the next event of the session.
 func (r *renderer) event(ev session.Event) {
+	r.at = ev.Number()
 	switch ev := ev.(type) {
 	case session.Frame:
 		r.frame(ev)
@@ -126,7 +172,8 @@ func (r *renderer) frame(f session.Frame) {
 		r.update(f, m)
 	case m.Method == "session/request_permission":
 		r.endThoughts()
-		r.sendAll(r.answer.feed(f))
+		r.sendAll(r.feedAnswer(f))
+		r.flushPlan()
 		r.permissionRequest(m)
 	case m.Method == "" && m.Result != nil && m.Result.StopReason != "":
 		r.endTurn()
@@ -169,11 +216,15 @@ func (r *renderer) update(f session.Frame, m rpc) {
 	}
 	switch kind {
 	case "agent_message_chunk":
-		r.sendAll(r.answer.feed(f))
+		r.sendAll(r.feedAnswer(f))
 	case "agent_thought_chunk":
+		if r.thinking.Len() == 0 {
+			r.thoughtSince = r.at
+		}
 		r.thinking.WriteString(chunkText(u))
 	case "tool_call", "tool_call_update":
-		r.sendAll(r.answer.feed(f))
+		r.sendAll(r.feedAnswer(f))
+		r.flushPlan()
 		r.toolUpdate(u)
 	case "plan":
 		r.planUpdate(u)
@@ -228,6 +279,7 @@ func (r *renderer) setWorking(on bool) {
 func (r *renderer) endThoughts() {
 	text := strings.TrimSpace(r.thinking.String())
 	r.thinking.Reset()
+	r.thoughtSince = 0
 	if text == "" {
 		return
 	}
@@ -284,7 +336,7 @@ func (r *renderer) lifecycle(l session.Lifecycle) {
 // endTurn shows what a turn left unsaid and closes what it left open.
 func (r *renderer) endTurn() {
 	r.endThoughts()
-	r.sendAll(r.answer.flush())
+	r.sendAll(r.flushAnswer())
 	r.finishPlan()
 	for _, p := range r.perms {
 		if !p.answered {
@@ -499,6 +551,9 @@ func (r *renderer) planUpdate(u map[string]any) {
 		return
 	}
 	r.planned.entries = entries
+	if !r.planned.dirty {
+		r.planSince = r.at
+	}
 	r.planned.dirty = true
 	if r.planned.message == "" {
 		r.editPlan()
@@ -515,14 +570,22 @@ func (r *renderer) editPlan() {
 	}
 	p.dirty = false
 	p.at = r.now()
+	r.planSince = 0
+}
+
+// flushPlan makes the plan's edit that waits, if there is one, now: a tool
+// notice or a permission request that follows is not shown without it, and a
+// restart between the two would show them again.
+func (r *renderer) flushPlan() {
+	if r.planned.dirty {
+		r.editPlan()
+	}
 }
 
 // finishPlan makes the plan's last edit, if it has one waiting, and forgets
 // the plan: the next turn's is a new notice.
 func (r *renderer) finishPlan() {
-	if r.planned.dirty {
-		r.editPlan()
-	}
+	r.flushPlan()
 	r.planned = planState{}
 }
 
