@@ -25,9 +25,10 @@ foreman reads the outcome with `result` and tells the owner.
 One StatefulSet `roomcity` of one pod, in the namespace `roomcity-example`, with
 three containers:
 
-- `gc` brings the checkout of the city's repository to its upstream's commit,
-  makes the city's store in its database, installs the city's packs and runs
-  gc's supervisor (`k8s/files/start.sh`).
+- `gc` brings the checkout of the city's repository to its upstream's commit
+  (or to the commit `CITY_REVISION` names, where the StatefulSet's `gc`
+  container sets it), makes the city's store in its database, installs the
+  city's packs and runs gc's supervisor (`k8s/files/start.sh`).
 - `roomcity` is the runtime's server. It makes a Job for each session, is the
   application service of the homeserver and keeps the transcripts.
 - `oauth2-proxy` is the only way to the transcripts page, which the server

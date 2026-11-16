@@ -1,11 +1,13 @@
 #!/bin/sh
 # The command of the pod's gc container: brings the checkout of the city's
-# repository to its upstream's commit, installs the city's packs, and runs the
-# gc supervisor in the foreground. Each step is safe to repeat.
+# repository to CITY_REVISION, or to its upstream's commit where that is unset,
+# installs the city's packs, and runs the gc supervisor in the foreground. Each
+# step is safe to repeat.
 #
-# From the environment: CITY_REPOSITORY, CITY_BRANCH, CITY_NAME, CITY_DOLT_HOST,
-# CITY_DOLT_PORT, CITY_DOLT_USER and CITY_DOLT_DATABASE. The secrets forgejo and dolt are mounted
-# under /run/roomcity/secrets.
+# From the environment: CITY_REPOSITORY, CITY_BRANCH, CITY_REVISION (optional),
+# CITY_NAME, CITY_DOLT_HOST, CITY_DOLT_PORT, CITY_DOLT_USER and
+# CITY_DOLT_DATABASE. The secrets forgejo and dolt are mounted under
+# /run/roomcity/secrets.
 set -eu
 
 secrets=/run/roomcity/secrets
@@ -23,7 +25,11 @@ export GIT_TERMINAL_PROMPT=0
 [ -d "$city/.git" ] || git clone -q -b "$CITY_BRANCH" "$CITY_REPOSITORY" "$city"
 cd "$city"
 git fetch -q
-git reset -q --hard '@{upstream}'
+if [ -n "${CITY_REVISION:-}" ]; then
+	git reset -q --hard "$CITY_REVISION"
+else
+	git reset -q --hard '@{upstream}'
+fi
 
 # bd and gc reach the shared Dolt with the password of bd's credentials file,
 # a link to the pod's secret.

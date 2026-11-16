@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `examples/minimal`: `start.sh` brings the city's checkout to the commit `CITY_REVISION` names when it is set, in place of the upstream's head.
+
 ### Changed
 
 - Updated: maunium.net/go/mautrix v0.33.0.
