@@ -104,8 +104,8 @@ func cut(kv string) (name, value string, ok bool) {
 //
 // Run takes an instruction as carried out when it has started it, and names
 // that instruction when it attaches again after a lost connection. A Cancel
-// also drops the prompts that had not started: the owner's stop is for
-// everything they wrote.
+// also drops the owner's prompts that had not started: the owner's stop is for
+// everything they wrote, and not for what gc sent.
 func Run(ctx context.Context, cfg Config) error {
 	h := newHost(cfg)
 	return h.run(ctx)

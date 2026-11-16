@@ -405,3 +405,54 @@ func TestFramesContinueAfterTheOnesTheServerHolds(t *testing.T) {
 	}
 	require.Contains(t, string(server.stored()[5].Message), "initialize")
 }
+
+func TestCancelDropsTheOwnersWaitingPromptsAndKeepsGcs(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	steps := []claudetest.Step{
+		claudetest.Expect(`{"type":"user"}`), claudetest.Send(echo), claudetest.Send(running),
+		claudetest.Do(func() { close(started) }), claudetest.Until(release),
+		claudetest.Send(result), claudetest.Send(idle),
+	}
+	steps = append(steps, answering("a")...)
+	steps = append(steps, answering("b")...)
+	r := start(t, claude(steps...))
+	gc := func(text string) *roomcityv1.AttachResponse {
+		in := prompt(text)
+		in.GetPrompt().Source = roomcityv1.PromptSource_PROMPT_SOURCE_GC
+		return in
+	}
+
+	r.server.instruct(prompt("running"))
+	<-started
+	r.server.instruct(gc("nudge one"))
+	r.server.instruct(prompt("owner waits"))
+	r.server.instruct(gc("nudge two"))
+	r.server.instruct(&roomcityv1.AttachResponse{Instruction: &roomcityv1.AttachResponse_Cancel{Cancel: &roomcityv1.Cancel{}}})
+	r.server.eventually(t, "the cancel", func(fs []*roomcityv1.Frame) bool {
+		return slices.Contains(methods(t, fs, roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT), "session/cancel")
+	})
+	close(release) // claude ends the interrupted turn
+	r.server.eventually(t, "three turns", func(fs []*roomcityv1.Frame) bool { return len(stopReasons(t, fs)) == 3 })
+	r.stop(t)
+
+	var order []string
+	for _, f := range r.server.stored() {
+		if f.Direction != roomcityv1.FrameDirection_FRAME_DIRECTION_TO_AGENT {
+			continue
+		}
+		var w struct {
+			Method string `json:"method"`
+			Params struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			} `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(f.Message, &w))
+		if w.Method == "session/prompt" {
+			order = append(order, w.Params.Prompt[0].Text)
+		}
+	}
+	require.Equal(t, []string{"running", "nudge one", "nudge two"}, order, "the owner's waiting prompt was dropped, gc's were delivered in order after the stop")
+}

@@ -158,12 +158,15 @@ func (h *host) turns(ctx context.Context) {
 	}
 }
 
-// cancel ends the running turn, drops the prompts waiting behind it and
-// answers every open permission request as cancelled, as ACP asks of the
-// client that cancels.
+// cancel ends the running turn, drops the owner's prompts waiting behind it,
+// and answers every open permission request as cancelled, as ACP asks of the
+// client that cancels. The prompts gc sent stay in the queue and run, in
+// order, once the turn has stopped.
 func (h *host) cancel(ctx context.Context) {
 	h.mu.Lock()
-	h.prompts = nil
+	h.prompts = slices.DeleteFunc(h.prompts, func(q queued) bool {
+		return q.source != roomcityv1.PromptSource_PROMPT_SOURCE_GC
+	})
 	sid := h.sid
 	for _, ch := range h.pending {
 		select {
