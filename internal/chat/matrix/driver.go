@@ -37,6 +37,7 @@ type Driver struct {
 	mu       sync.Mutex
 	speakers map[string]*appservice.IntentAPI
 	rooms    map[chat.RoomID]struct{}
+	warned   map[string]struct{} // what has been logged once already
 }
 
 var _ chat.Driver = (*Driver)(nil)
@@ -69,6 +70,7 @@ func New(cfg Config, asToken, hsToken string, log *slog.Logger) (*Driver, error)
 		ep:       appservice.NewEventProcessor(as),
 		speakers: map[string]*appservice.IntentAPI{},
 		rooms:    map[chat.RoomID]struct{}{},
+		warned:   map[string]struct{}{},
 	}, nil
 }
 

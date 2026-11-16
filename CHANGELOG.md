@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The chat side no longer loops on a room whose holder has joined. Inviting someone who was in a room already, as every holder is after the first start, was answered "cannot invite user that is joined or banned", which was taken as the room not being made, and tried again every five seconds with the rest of the room's setup never reached. The driver reads the room's membership first and invites only those who are not in it; a banned holder is left as they are, with a word in the log the first time.
+
 ## [0.3.1] - 2026-11-16
 
 ### Fixed

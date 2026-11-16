@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -128,15 +129,12 @@ func (d *Driver) children(ctx context.Context, space id.RoomID) ([]id.RoomID, er
 }
 
 func (d *Driver) createRoom(ctx context.Context, spec chat.RoomSpec) (id.RoomID, error) {
-	levels := map[id.UserID]int{}
-	for _, user := range spec.Invite {
-		levels[id.UserID(user)] = ownerPowerLevel
-	}
+	// The holders' power levels are not set here: one id the homeserver
+	// refuses would refuse the room. inviteHolders sets them, one at a time.
 	req := &mautrix.ReqCreateRoom{
-		Visibility:         "private",
-		Preset:             "private_chat",
-		Name:               spec.Title,
-		PowerLevelOverride: &event.PowerLevelsEventContent{Users: levels},
+		Visibility: "private",
+		Preset:     "private_chat",
+		Name:       spec.Title,
 	}
 	if !spec.Open {
 		req.RoomAliasName = d.aliasLocal(spec.Key)
@@ -171,14 +169,8 @@ func (d *Driver) openToSpace(ctx context.Context, room, space id.RoomID) error {
 // admit invites the spec's people, who hold the owner's power level, and lets
 // the speaker in.
 func (d *Driver) admit(ctx context.Context, room id.RoomID, spec chat.RoomSpec) error {
-	bot := d.as.BotIntent()
-	for _, user := range spec.Invite {
-		if err := bot.EnsureInvited(ctx, room, id.UserID(user)); err != nil {
-			return fmt.Errorf("inviting %s to %q: %w", user, spec.Title, err)
-		}
-		if _, err := bot.SetPowerLevel(ctx, room, id.UserID(user), ownerPowerLevel); err != nil {
-			return fmt.Errorf("giving %s power in %q: %w", user, spec.Title, err)
-		}
+	if err := d.inviteHolders(ctx, room, spec); err != nil {
+		return err
 	}
 	speaker, err := d.speaker(ctx, spec.Speaker)
 	if err != nil {
@@ -188,6 +180,74 @@ func (d *Driver) admit(ctx context.Context, room id.RoomID, spec chat.RoomSpec) 
 		return fmt.Errorf("letting %s into %q: %w", speaker.UserID, spec.Title, err)
 	}
 	return nil
+}
+
+// inviteHolders invites the spec's people who are not in the room, and gives
+// each the owner's power level. Someone who has joined, or been invited
+// already, is not invited again, which the homeserver refuses; someone who is
+// banned is left as they are, with a word in the log the first time.
+// Whoever cannot be invited, or cannot be given the level, for any other
+// reason, a misspelt id among them, is logged the same way and passed over: the
+// room is made with the others. Only a room whose state cannot be read is an
+// error.
+func (d *Driver) inviteHolders(ctx context.Context, room id.RoomID, spec chat.RoomSpec) error {
+	bot := d.as.BotIntent()
+	state, err := bot.State(ctx, room)
+	if err != nil {
+		return fmt.Errorf("reading the state of %q: %w", spec.Title, err)
+	}
+	for _, holder := range spec.Invite {
+		user := id.UserID(holder)
+		switch membership(state, user) {
+		case event.MembershipBan:
+			d.warnOnce(room, user, "a holder is banned from a room of the city, and is left as they are")
+			continue
+		case event.MembershipJoin, event.MembershipInvite:
+		default:
+			if _, err := bot.InviteUser(ctx, room, &mautrix.ReqInviteUser{UserID: user}); err != nil && !alreadyIn(err) {
+				d.warnOnce(room, user, "a holder could not be invited to a room of the city, and is passed over: "+err.Error())
+				continue
+			}
+		}
+		if _, err := bot.SetPowerLevel(ctx, room, user, ownerPowerLevel); err != nil {
+			d.warnOnce(room, user, "a holder could not be given the owner's level in a room of the city, and is passed over: "+err.Error())
+		}
+	}
+	return nil
+}
+
+// membership returns what the room's state says of the user's membership, or
+// "" if it says nothing.
+func membership(state mautrix.RoomStateMap, user id.UserID) event.Membership {
+	evt := state[event.StateMember][string(user)]
+	if evt == nil {
+		return ""
+	}
+	_ = evt.Content.ParseRaw(event.StateMember) // an event that is parsed already says so
+	if m := evt.Content.AsMember(); m != nil {
+		return m.Membership
+	}
+	return ""
+}
+
+// alreadyIn reports the homeserver's refusal to invite someone who is in the
+// room or banned from it, which a state read a moment before can have missed.
+func alreadyIn(err error) bool {
+	var httpErr mautrix.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.RespError == nil {
+		return false
+	}
+	text := httpErr.RespError.Err
+	return strings.Contains(text, "joined or banned") || strings.Contains(text, "already")
+}
+
+func (d *Driver) warnOnce(room id.RoomID, user id.UserID, msg string) {
+	key := string(room) + " " + string(user)
+	if _, seen := d.warned[key]; seen {
+		return
+	}
+	d.warned[key] = struct{}{}
+	d.log.Warn(msg, "user", user, "room", room)
 }
 
 // putInSpace makes the room a child of the space and the space its parent.
