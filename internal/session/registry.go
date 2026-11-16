@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +20,7 @@ import (
 // schemaVersion is the version of the database's layout, kept in its
 // user_version. A database of an earlier version is migrated when it is
 // opened (migrate), one that is of a later version is refused.
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -93,6 +94,7 @@ const (
 	eventFrame = iota + 1
 	eventPrompt
 	eventLifecycle
+	eventFile
 )
 
 // Registry keeps the sessions, their numbered events and their queues of
@@ -390,6 +392,13 @@ func (r *Registry) appendEvent(tx *sql.Tx, name string, e Event) (uint64, error)
 	case Lifecycle:
 		_, err = tx.Exec(`INSERT INTO events (session, seq, time, kind, lkind) VALUES (?, ?, ?, ?, ?)`,
 			name, seq, at, eventLifecycle, e.Kind)
+	case File:
+		meta, merr := json.Marshal(fileMeta{MediaType: e.MediaType, Size: e.Size, Event: e.Event})
+		if merr != nil {
+			return 0, merr
+		}
+		_, err = tx.Exec(`INSERT INTO events (session, seq, time, kind, text, message) VALUES (?, ?, ?, ?, ?, ?)`,
+			name, seq, at, eventFile, e.Name, meta)
 	default:
 		err = fmt.Errorf("session: unknown event %T", e)
 	}
@@ -526,6 +535,8 @@ func (r *Registry) eventsAfter(ctx context.Context, name string, after uint64) (
 			out = append(out, Prompt{Seq: seq, Time: time.Unix(0, at), Source: Source(source), Text: text, State: PromptState(pstate), Of: of})
 		case eventLifecycle:
 			out = append(out, Lifecycle{Seq: seq, Time: time.Unix(0, at), Kind: LifecycleKind(lkind)})
+		case eventFile:
+			out = append(out, fileFrom(seq, at, text, message))
 		}
 	}
 	return out, rows.Err()

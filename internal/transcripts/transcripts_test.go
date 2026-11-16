@@ -139,3 +139,33 @@ func TestPageIsReadOnly(t *testing.T) {
 		require.Equal(t, http.StatusMethodNotAllowed, rec.Code, method)
 	}
 }
+
+func TestAFileSentToTheRoomIsInThePageAndInTheRawStream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	reg, err := session.Open(ctx, filepath.Join(t.TempDir(), "r.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reg.Close() })
+	_, err = reg.Start(ctx, "s", "worker", session.Task)
+	require.NoError(t, err)
+	_, err = reg.RecordFile(ctx, "s", session.File{Name: "chart.png", MediaType: "image/png", Size: 8, Event: "$e1"})
+	require.NoError(t, err)
+	require.NoError(t, reg.End(ctx, "s"))
+	h := (&transcripts.Page{Source: reg, City: "sandbox"}).Handler()
+
+	code, body, _ := get(t, h, "/-/s")
+	require.Equal(t, http.StatusOK, code)
+	require.Contains(t, body, "chart.png")
+
+	code, body, _ = get(t, h, "/-/s/raw")
+	require.Equal(t, http.StatusOK, code)
+	var found map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(body), "\n") {
+		var m map[string]any
+		require.NoError(t, json.Unmarshal([]byte(l), &m))
+		if m["type"] == "file" {
+			found = m
+		}
+	}
+	require.Equal(t, map[string]any{"seq": found["seq"], "time": found["time"], "type": "file", "name": "chart.png", "media_type": "image/png", "size": float64(8), "event": "$e1"}, found)
+}

@@ -77,7 +77,10 @@ type Options struct {
 	Listeners Listeners
 	// Jobs is the Kubernetes side of the sessions.
 	Jobs operate.Jobs
-	Log  *slog.Logger
+	// Files is where a file a session sends goes to its room; nil is a server
+	// with no chat side to send to.
+	Files server.Files
+	Log   *slog.Logger
 }
 
 // resetter asks gc to reset a session: `gc session reset <id of its bead>`, run
@@ -148,7 +151,7 @@ func Run(ctx context.Context, o Options) error {
 	reg.SetResetter(resetter(cfg))
 
 	s := server.New()
-	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg}))
+	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: o.Files, Log: log}))
 	s.Handle(roomcityv1connect.NewGcServiceHandler(gchandler.New(gchandler.Config{
 		CityDir:    cfg.Server.CityDir,
 		GcPath:     cfg.Server.Gc,
@@ -189,7 +192,7 @@ func Run(ctx context.Context, o Options) error {
 		on   net.Listener
 		h    http.Handler
 	}{
-		{"network", o.Listeners.Network, s.Handler()},
+		{"network", o.Listeners.Network, server.LimitSend(s.Handler(), reg, server.DefaultMaxFile)},
 		{"runtime", o.Listeners.Runtime, s.RuntimeHandler()},
 		{"page", o.Listeners.Page, s.PageHandler()},
 	} {

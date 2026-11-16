@@ -92,6 +92,8 @@ func scanEntry(rows *sql.Rows) (Entry, error) {
 		return Entry{when, Prompt{Seq: seq, Source: Source(source), Text: text, State: PromptState(pstate), Of: of}}, nil
 	case eventLifecycle:
 		return Entry{when, Lifecycle{Seq: seq, Kind: LifecycleKind(lkind)}}, nil
+	case eventFile:
+		return Entry{when, fileFrom(seq, at, text, message)}, nil
 	}
 	return Entry{}, fmt.Errorf("session: event %d is of kind %d, which this server does not know", seq, kind)
 }

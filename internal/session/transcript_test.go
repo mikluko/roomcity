@@ -94,3 +94,20 @@ func TestPurgeRemovesWhatEndedBeforeTheTimeAndNothingElse(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, session.Lifecycle{Seq: 1, Kind: session.Started}, recv(t, evs), "and begins from 1")
 }
+
+func TestTranscriptHoldsAFileSentToTheRoom(t *testing.T) {
+	ctx := ctxT(t)
+	r := open(t, filepath.Join(t.TempDir(), "r.db"))
+	_, err := r.Start(ctx, "s", "worker", session.Task)
+	require.NoError(t, err)
+	seq, err := r.RecordFile(ctx, "s", session.File{Name: "chart.png", MediaType: "image/png", Size: 8, Event: "$e1"})
+	require.NoError(t, err)
+
+	_, entries, err := r.Transcript(ctx, "s", 0)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	f, ok := entries[1].Event.(session.File)
+	require.True(t, ok, "%T", entries[1].Event)
+	require.Equal(t, session.File{Seq: seq, Time: f.Time, Name: "chart.png", MediaType: "image/png", Size: 8, Event: "$e1"}, f)
+	require.Equal(t, entries[1].Time, f.Time)
+}

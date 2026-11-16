@@ -221,6 +221,9 @@ func migrate(ctx context.Context, db *sql.DB, from int) error {
 			return err
 		}
 	}
+	// Version 4 is the File kind of event: nothing to move, and the version is
+	// there so that a server of an earlier version refuses the database rather
+	// than fail on a transcript that holds a File.
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 		return err
 	}

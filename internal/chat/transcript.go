@@ -32,6 +32,9 @@ func Transcript(entries []session.Entry) []Item {
 		if p, ok := e.Event.(session.Prompt); ok && p.State == session.Stored && p.Source == session.FromOwner {
 			out.add("owner", Message{Kind: Text, Body: p.Text})
 		}
+		if f, ok := e.Event.(session.File); ok {
+			out.add("agent", Message{Kind: Notice, Body: fmt.Sprintf("Sent a file: %s (%s, %d bytes)", f.Name, f.MediaType, f.Size)})
+		}
 		r.event(e.Event)
 	}
 	r.drain()

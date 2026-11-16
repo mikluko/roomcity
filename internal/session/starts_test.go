@@ -346,7 +346,7 @@ func TestTheServerCopiesTheDatabaseAsItWasBeforeItMigratesIt(t *testing.T) {
 
 	// The database itself is migrated.
 	version, hasStarts = userVersion(t, path)
-	require.Equal(t, 3, version)
+	require.Equal(t, 4, version)
 	require.True(t, hasStarts)
 	starts, err := r.Starts(ctx, "host")
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestACopyThatExistsIsNeverInTheWayOfTheServerNorReplaced(t *testing.T) {
 	version, _ := userVersion(t, r.BackupPath())
 	require.Equal(t, 1, version, "the copy of this try is whole")
 	version, _ = userVersion(t, path)
-	require.Equal(t, 3, version, "and the database is migrated")
+	require.Equal(t, 4, version, "and the database is migrated")
 }
 
 func TestAFailedMigrationLeavesTheDatabaseAndNoCopyThatWouldBlockTheNextTry(t *testing.T) {
@@ -476,7 +476,7 @@ func TestADatabaseOfSchemaTwoHasItsShownCursorsMovedToTheHead(t *testing.T) {
 	require.Equal(t, map[string]uint64{"guest": 6, "host": 1}, shown, "each at its last event: guest's is the Started and five frames")
 
 	version, _ := userVersion(t, path)
-	require.Equal(t, 3, version)
+	require.Equal(t, 4, version)
 	require.Equal(t, filepath.Join(dir, "roomcity.v2."), r.BackupPath()[:len(filepath.Join(dir, "roomcity.v2."))], "the copy of version 2 is made")
 	require.NoError(t, r.Close())
 

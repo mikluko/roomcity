@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The database is of schema version 4: a session's stream may hold a `File` event, a file the session sent to its room, which the transcript page and the raw stream show. A server of version 3 refuses a database of version 4 rather than fail on a transcript that holds one. The step from 3 changes only the version.
+
 ## [0.8.0] - 2026-11-16
 
 ### Added

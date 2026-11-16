@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -22,6 +25,51 @@ const stageChunk = 64 << 10
 // bundle. A call proves its session by the session's token.
 type Host struct {
 	Registry *session.Registry
+	// Files is where a file goes to the room; nil is a server with no chat side.
+	Files Files
+	// MaxFile is the most bytes of a file that Send takes; zero is DefaultMaxFile.
+	MaxFile int64
+	Log     *slog.Logger
+}
+
+// DefaultMaxFile is the most bytes of a file Send takes when the server is
+// told no other, as the chat side's own limit is by default.
+const DefaultMaxFile = 10 << 20
+
+// File is a file for the room.
+type File struct {
+	Name, MediaType, Caption string
+	Data                     []byte
+}
+
+// Files is the chat side as Send uses it: it sends the file to the session's
+// room and returns the chat system's id of the event that carries it. Its
+// refusals are ErrFileTooLarge, ErrFileKind, ErrNoRoom and ErrChatDown, wrapped
+// with the reason, which Send maps to the codes that the agent reads.
+type Files interface {
+	SendFile(ctx context.Context, session string, f File) (event string, err error)
+}
+
+// What the chat side refuses a file for.
+var (
+	ErrFileTooLarge = errors.New("the file is larger than the room takes")
+	ErrFileKind     = errors.New("the room does not take a file of that kind")
+	ErrNoRoom       = errors.New("the session has no room")
+	ErrChatDown     = errors.New("the chat system cannot be reached")
+)
+
+func (h *Host) maxFile() int64 {
+	if h.MaxFile > 0 {
+		return h.MaxFile
+	}
+	return DefaultMaxFile
+}
+
+func (h *Host) logger() *slog.Logger {
+	if h.Log != nil {
+		return h.Log
+	}
+	return slog.Default()
 }
 
 var _ roomcityv1connect.HostServiceHandler = (*Host)(nil)
@@ -136,13 +184,44 @@ func (h *Host) Handled(ctx context.Context, req *connect.Request[roomcityv1.Hand
 	return connect.NewResponse(&roomcityv1.HandledResponse{}), nil
 }
 
-// Send answers Unimplemented: the server's side of a file sent to the room
-// is not here yet.
+// Send hands a file of the session to the room through Files and records, in
+// the session's stream, what it was and the event that carries it. The call
+// proves its session by its token; the bounds are checked here, since the host
+// is not trusted with them, and then by the chat side, whose they also are.
+// What the agent reads of a refusal is the message of the error.
 func (h *Host) Send(ctx context.Context, req *connect.Request[roomcityv1.SendRequest]) (*connect.Response[roomcityv1.SendResponse], error) {
-	if err := h.authorize(req.Msg.Session, req.Header()); err != nil {
+	m := req.Msg
+	if err := h.authorize(m.Session, req.Header()); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the server does not take a file for the room yet"))
+	switch {
+	case len(m.Data) == 0:
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("the file is empty"))
+	case m.Name == "" || m.Name != filepath.Base(m.Name) || m.Name == "." || m.Name == "..":
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("%q is not the name of a file: it must be a name without a directory", m.Name))
+	case int64(len(m.Data)) > h.maxFile():
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("the file is %d bytes, and the server takes at most %d", len(m.Data), h.maxFile()))
+	}
+	if h.Files == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("the server has no chat system to send a file to"))
+	}
+	event, err := h.Files.SendFile(ctx, m.Session, File{Name: m.Name, MediaType: m.MediaType, Caption: m.Caption, Data: m.Data})
+	switch {
+	case errors.Is(err, ErrFileTooLarge), errors.Is(err, ErrFileKind):
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	case errors.Is(err, ErrNoRoom):
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, ErrChatDown):
+		return nil, connect.NewError(connect.CodeUnavailable, err)
+	case err != nil:
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	// The file is in the room; its record is the transcript's, and no reason to
+	// tell the agent that it was not sent.
+	if _, err := h.Registry.RecordFile(ctx, m.Session, session.File{Name: m.Name, MediaType: m.MediaType, Size: int64(len(m.Data)), Event: event}); err != nil {
+		h.logger().Error("recording a file sent to the room", "session", m.Session, "name", m.Name, "err", err)
+	}
+	return connect.NewResponse(&roomcityv1.SendResponse{Event: event}), nil
 }
 
 // Stage sends the bundle of the session's start: the manifest, then the

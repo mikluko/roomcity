@@ -215,6 +215,10 @@ type rawLine struct {
 	State     string          `json:"state,omitempty"`
 	Text      string          `json:"text,omitempty"`
 	Of        uint64          `json:"of,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	MediaType string          `json:"media_type,omitempty"`
+	Size      int64           `json:"size,omitempty"`
+	Event     string          `json:"event,omitempty"`
 	Kind      string          `json:"kind,omitempty"`
 }
 
@@ -235,6 +239,8 @@ func line(e session.Entry) rawLine {
 		l.Seq, l.Type, l.Text, l.Of = ev.Seq, "prompt", ev.Text, ev.Of
 		l.Source = map[session.Source]string{session.FromOwner: "owner", session.FromGC: "gc"}[ev.Source]
 		l.State = map[session.PromptState]string{session.Stored: "stored", session.Waiting: "waiting", session.Delivered: "delivered", session.Dropped: "dropped"}[ev.State]
+	case session.File:
+		l.Seq, l.Type, l.Name, l.MediaType, l.Size, l.Event = ev.Seq, "file", ev.Name, ev.MediaType, ev.Size, ev.Event
 	case session.Lifecycle:
 		l.Seq, l.Type = ev.Seq, "lifecycle"
 		l.Kind = map[session.LifecycleKind]string{session.Started: "started", session.StartedAfresh: "started_afresh", session.Stopped: "stopped"}[ev.Kind]

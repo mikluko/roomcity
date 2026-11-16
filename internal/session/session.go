@@ -58,10 +58,10 @@ const (
 	FromAgent
 )
 
-// Event is something that happened in a session: a Frame, a Prompt or a
+// Event is something that happened in a session: a Frame, a Prompt, a File or a
 // Lifecycle.
 //
-// Every event of a session has a Seq, one numbering for all three kinds,
+// Every event of a session has a Seq, one numbering for all four kinds,
 // from 1 in the order the server recorded them. The numbering belongs to the
 // session's name and goes on across a start afresh; a Lifecycle of kind
 // StartedAfresh marks where the new agent's stream begins.
@@ -145,6 +145,22 @@ type Lifecycle struct {
 	Time time.Time
 	Kind LifecycleKind
 }
+
+// File records a file a session sent to its room: what it was and the room's
+// event that carries it, never its bytes.
+type File struct {
+	Seq  uint64
+	Time time.Time
+	// Name is the file's name, without a directory.
+	Name      string
+	MediaType string
+	// Size is the number of bytes it had.
+	Size int64
+	// Event is the chat system's id of the event that carries the file.
+	Event string
+}
+
+func (e File) Number() uint64 { return e.Seq }
 
 func (e Frame) Number() uint64     { return e.Seq }
 func (e Prompt) Number() uint64    { return e.Seq }
