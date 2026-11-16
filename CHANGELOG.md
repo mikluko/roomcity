@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The room's `done` tool accepts `blocked`, `commit` and `branch`, validating a commit id of 7 to 40 hexadecimal digits with a non-empty branch and refusing either field on a blocked task; `result` explains `no-op`, `shipped`, `blocked` and `abandoned` and, for an abandoned task, says that the server ended the worker's session before it gave a result and gives the server's reason.
+
 ### Changed
 
 - Updated: github.com/yuin/goldmark v1.8.7.

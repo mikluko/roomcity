@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -31,11 +32,13 @@ type fakeRoomRPC struct {
 	sent       []*roomcityv1.SendRequest
 	dispatched []string
 	waited     []string
-	done       []string
+	done       []*roomcityv1.DoneRequest
 	err        error // what every call answers with
 	closed     bool  // whether Result says the task is closed
 	found      bool  // whether Claim finds a task
-	noResult   bool  // whether a closed task's result is empty
+	status     string
+	result     string
+	outcome    string
 }
 
 func (f *fakeRoomRPC) Send(_ context.Context, r *connect.Request[roomcityv1.SendRequest]) (*connect.Response[roomcityv1.SendResponse], error) {
@@ -68,18 +71,14 @@ func (f *fakeRoomRPC) Claim(context.Context, *connect.Request[roomcityv1.ClaimRe
 func (f *fakeRoomRPC) Done(_ context.Context, r *connect.Request[roomcityv1.DoneRequest]) (*connect.Response[roomcityv1.DoneResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.done = append(f.done, r.Msg.Result)
+	f.done = append(f.done, r.Msg)
 	return connect.NewResponse(&roomcityv1.DoneResponse{}), f.err
 }
 
 func (f *fakeRoomRPC) Result(context.Context, *connect.Request[roomcityv1.ResultRequest]) (*connect.Response[roomcityv1.ResultResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	result := "Fixed in 3 lines."
-	if f.noResult {
-		result = ""
-	}
-	return connect.NewResponse(&roomcityv1.ResultResponse{Closed: f.closed, Status: "in_progress", Result: result}), f.err
+	return connect.NewResponse(&roomcityv1.ResultResponse{Closed: f.closed, Status: f.status, Result: f.result, Outcome: f.outcome}), f.err
 }
 
 // roomSession serves the room with the tools over dir and returns an MCP
@@ -242,8 +241,62 @@ func TestARoomOffersOnlyTheToolsItsSessionHas(t *testing.T) {
 	}
 }
 
+func TestDoneAndResultSchemasTellTheAgentHowToUseThem(t *testing.T) {
+	cs := roomSessionWith(t, t.TempDir(), &fakeRoomRPC{}, "done", "result")
+	tools, err := cs.ListTools(context.Background(), nil)
+	require.NoError(t, err)
+	byName := make(map[string]*mcp.Tool, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		byName[tool.Name] = tool
+	}
+
+	type schema struct {
+		Type       string `json:"type"`
+		Properties map[string]struct {
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	schemaOf := func(tool *mcp.Tool) schema {
+		t.Helper()
+		raw, err := json.Marshal(tool.InputSchema)
+		require.NoError(t, err)
+		var got schema
+		require.NoError(t, json.Unmarshal(raw, &got))
+		return got
+	}
+
+	done := schemaOf(byName["done"])
+	require.Equal(t, "object", done.Type)
+	require.ElementsMatch(t, []string{"result"}, done.Required)
+	wantDone := map[string]struct{ kind, description string }{
+		"result":  {"string", "what came of the task; if blocked, what prevented it"},
+		"blocked": {"boolean", "true only when you could not carry out the task; do not set it merely because no commit was made"},
+		"commit":  {"string", "the id of the commit that satisfies the task, 7 to 40 hexadecimal digits; give branch with it, and use only for work that changed a repository; otherwise omit both commit and branch"},
+		"branch":  {"string", "the non-empty branch that commit is on; give commit with it, and use only for work that changed a repository; otherwise omit both commit and branch"},
+	}
+	require.Len(t, done.Properties, len(wantDone))
+	for name, want := range wantDone {
+		require.Equal(t, want.kind, done.Properties[name].Type, name)
+		require.Equal(t, want.description, done.Properties[name].Description, name)
+	}
+	require.Contains(t, byName["done"].Description, "completing it without a commit is not blocked")
+	require.Contains(t, byName["done"].Description, "A blocked task takes neither commit nor branch: put what prevented it in result.")
+
+	result := schemaOf(byName["result"])
+	require.Equal(t, "object", result.Type)
+	require.ElementsMatch(t, []string{"task"}, result.Required)
+	require.Len(t, result.Properties, 1)
+	require.Equal(t, "string", result.Properties["task"].Type)
+	for _, outcome := range []string{"no-op", "shipped", "blocked", "abandoned"} {
+		require.Contains(t, byName["result"].Description, outcome)
+	}
+	require.Contains(t, byName["result"].Description, "abandoned (failed: the server ended the worker's session before it gave a result; the server's reason follows)")
+}
+
 func TestTheForemanHandsATaskToAWorkerAndAsksHowItStands(t *testing.T) {
-	rpc := &fakeRoomRPC{}
+	rpc := &fakeRoomRPC{status: "in_progress"}
 	cs := roomSessionWith(t, t.TempDir(), rpc, "dispatch", "wait", "result")
 
 	res := callTool(t, cs, "dispatch", map[string]any{"task": "Fix the bug in the parser"})
@@ -256,16 +309,68 @@ func TestTheForemanHandsATaskToAWorkerAndAsksHowItStands(t *testing.T) {
 	require.Equal(t, []string{"sa-9"}, rpc.waited)
 
 	res = callTool(t, cs, "result", map[string]any{"task": "sa-9"})
-	require.Contains(t, text(res), "not done yet (in_progress)")
-	rpc.closed = true
-	res = callTool(t, cs, "result", map[string]any{"task": "sa-9"})
-	require.Equal(t, "Fixed in 3 lines.", text(res))
-	rpc.noResult = true
-	require.Equal(t, "Task sa-9 is closed, and the worker left nothing.", text(callTool(t, cs, "result", map[string]any{"task": "sa-9"})))
+	require.Equal(t, "Task sa-9 is not done yet (in_progress).", text(res))
 
 	res = callTool(t, cs, "dispatch", map[string]any{"task": "  "})
 	require.True(t, res.IsError, "an empty task is no task")
 	require.Len(t, rpc.dispatched, 1)
+}
+
+func TestResultSaysHowAClosedTaskEndedBeforeWhatTheWorkerLeft(t *testing.T) {
+	for name, tc := range map[string]struct {
+		outcome string
+		result  string
+		want    string
+	}{
+		"no-op": {
+			outcome: "no-op",
+			result:  "Explained why no change was needed.",
+			want:    "Task sa-9 is closed. Outcome: no-op — carried out, with a result and no change committed.\nWorker's result:\nExplained why no change was needed.",
+		},
+		"shipped": {
+			outcome: "shipped",
+			result:  "Fixed in 3 lines.",
+			want:    "Task sa-9 is closed. Outcome: shipped — carried out, with a commit and its branch recorded.\nWorker's result:\nFixed in 3 lines.",
+		},
+		"blocked": {
+			outcome: "blocked",
+			result:  "Needs owner approval.",
+			want:    "Task sa-9 is closed. Outcome: blocked — the worker could not carry out the task.\nWorker's result:\nNeeds owner approval.",
+		},
+		"abandoned": {
+			outcome: "abandoned",
+			result:  "ended without a result: timed out after 30m0s",
+			want:    "Task sa-9 is closed. Outcome: abandoned — failed: the server ended the worker's session before it gave a result.\nReason from the server:\nended without a result: timed out after 30m0s",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{closed: true, status: "closed", outcome: tc.outcome, result: tc.result}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "result")
+
+			res := callTool(t, cs, "result", map[string]any{"task": "sa-9"})
+
+			require.False(t, res.IsError, text(res))
+			require.Equal(t, tc.want, text(res))
+		})
+	}
+}
+
+func TestResultWithoutAKnownOutcomeIsLeftAsItWas(t *testing.T) {
+	for name, tc := range map[string]struct {
+		outcome string
+		result  string
+		want    string
+	}{
+		"no outcome":       {result: "Fixed in 3 lines.", want: "Fixed in 3 lines."},
+		"unknown outcome":  {outcome: "future", result: "Fixed in 3 lines.", want: "Fixed in 3 lines."},
+		"nothing recorded": {want: "Task sa-9 is closed, and the worker left nothing."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{closed: true, status: "closed", outcome: tc.outcome, result: tc.result}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "result")
+			require.Equal(t, tc.want, text(callTool(t, cs, "result", map[string]any{"task": "sa-9"})))
+		})
+	}
 }
 
 func TestTheWorkerClaimsItsTaskAndClosesItWithWhatCameOfIt(t *testing.T) {
@@ -278,10 +383,105 @@ func TestTheWorkerClaimsItsTaskAndClosesItWithWhatCameOfIt(t *testing.T) {
 
 	res = callTool(t, cs, "done", map[string]any{"result": "Fixed in 3 lines."})
 	require.False(t, res.IsError, text(res))
-	require.Equal(t, []string{"Fixed in 3 lines."}, rpc.done)
+	require.Equal(t, []*roomcityv1.DoneRequest{{Session: "s", Result: "Fixed in 3 lines."}}, rpc.done)
 
 	rpc.found = false
 	require.Contains(t, text(callTool(t, cs, "claim", nil)), "no task for you")
+}
+
+func TestDonePassesBlockedToTheServer(t *testing.T) {
+	rpc := &fakeRoomRPC{}
+	cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+	res := callTool(t, cs, "done", map[string]any{"result": "Needs owner approval.", "blocked": true})
+
+	require.False(t, res.IsError, text(res))
+	require.Equal(t, []*roomcityv1.DoneRequest{{Session: "s", Result: "Needs owner approval.", Blocked: true}}, rpc.done)
+}
+
+func TestDoneAcceptsFullAndAbbreviatedCommitIDs(t *testing.T) {
+	for name, commit := range map[string]string{
+		"abbreviated": "abc1234",
+		"full":        "0123456789abcdef0123456789abcdef01234567",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+			res := callTool(t, cs, "done", map[string]any{"result": "Fixed in 3 lines.", "commit": commit, "branch": "fix-parser"})
+
+			require.False(t, res.IsError, text(res))
+			require.Equal(t, []*roomcityv1.DoneRequest{{Session: "s", Result: "Fixed in 3 lines.", Commit: commit, Branch: "fix-parser"}}, rpc.done)
+		})
+	}
+}
+
+func TestDoneRefusesACommitOrBranchWithoutTheOther(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"commit without branch": {"result": "Fixed.", "commit": "abc1234"},
+		"branch without commit": {"result": "Fixed.", "branch": "fix-parser"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+			res := callTool(t, cs, "done", args)
+
+			require.True(t, res.IsError)
+			require.Equal(t, "a commit and its branch are given together or not at all", text(res))
+			require.Empty(t, rpc.done)
+		})
+	}
+}
+
+func TestDoneRefusesACommitOrBranchOnABlockedTask(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"commit and branch": {"result": "Needs owner approval.", "blocked": true, "commit": "abc1234", "branch": "fix-parser"},
+		"commit only":       {"result": "Needs owner approval.", "blocked": true, "commit": "abc1234"},
+		"branch only":       {"result": "Needs owner approval.", "blocked": true, "branch": "fix-parser"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+			res := callTool(t, cs, "done", args)
+
+			require.True(t, res.IsError)
+			require.Equal(t, "a blocked task records no commit: put it in the result", text(res))
+			require.Empty(t, rpc.done)
+		})
+	}
+}
+
+func TestDoneRefusesACommitThatIsNotAnID(t *testing.T) {
+	for name, commit := range map[string]string{
+		"none":            "none",
+		"too short":       "abc123",
+		"too long":        "0123456789abcdef0123456789abcdef012345678",
+		"non-hexadecimal": "abcdefg",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeRoomRPC{}
+			cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+			res := callTool(t, cs, "done", map[string]any{"result": "Fixed.", "commit": commit, "branch": "fix-parser"})
+
+			require.True(t, res.IsError)
+			require.Equal(t, "commit is not an id of 7 to 40 hexadecimal digits: give the commit's id and its branch, or omit both", text(res))
+			require.Empty(t, rpc.done)
+		})
+	}
+}
+
+func TestDoneRefusesABranchThatIsEmptyAfterTrimming(t *testing.T) {
+	rpc := &fakeRoomRPC{}
+	cs := roomSessionWith(t, t.TempDir(), rpc, "done")
+
+	res := callTool(t, cs, "done", map[string]any{"result": "Fixed.", "commit": "abc1234", "branch": " \t "})
+
+	require.True(t, res.IsError)
+	require.Equal(t, "branch is empty after trimming: give the branch the commit is on, or omit both commit and branch", text(res))
+	require.Empty(t, rpc.done)
 }
 
 func TestTheServersRefusalOfAWorkToolReachesTheAgentInItsWords(t *testing.T) {

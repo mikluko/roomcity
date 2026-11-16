@@ -140,8 +140,10 @@ func (r *room) server() *mcp.Server {
 			}, r.wait)
 		case "result":
 			mcp.AddTool(s, &mcp.Tool{
-				Name:        "result",
-				Description: "Read how a task you dispatched stands and, once it is closed, what the worker made of it.",
+				Name: "result",
+				Description: "Read how a task you dispatched stands and, once it is closed, its outcome and the worker's result. " +
+					"A closed task's outcome is no-op (carried out, with a result and no change committed), shipped (carried out, with a commit and its branch), " +
+					"blocked (the worker could not carry it out), or abandoned (failed: the server ended the worker's session before it gave a result; the server's reason follows).",
 			}, r.result)
 		case "claim":
 			mcp.AddTool(s, &mcp.Tool{
@@ -150,8 +152,11 @@ func (r *room) server() *mcp.Server {
 			}, r.claim)
 		case "done":
 			mcp.AddTool(s, &mcp.Tool{
-				Name:        "done",
-				Description: "Close the task you claimed with what came of it, for the one who dispatched it to read. The session ends.",
+				Name: "done",
+				Description: "Close the task you claimed with what came of it, for the one who dispatched it to read. " +
+					"Set blocked when you could not carry out the task; completing it without a commit is not blocked. " +
+					"For work that changed a repository and made a commit, give commit (the commit id, 7 to 40 hexadecimal digits) and a non-empty branch together; otherwise omit both. " +
+					"A blocked task takes neither commit nor branch: put what prevented it in result. The session ends.",
 			}, r.done)
 		}
 	}
@@ -252,7 +257,10 @@ type dispatchArgs struct {
 }
 
 type doneArgs struct {
-	Result string `json:"result" jsonschema:"what came of the task"`
+	Result  string `json:"result" jsonschema:"what came of the task; if blocked, what prevented it"`
+	Blocked bool   `json:"blocked,omitempty" jsonschema:"true only when you could not carry out the task; do not set it merely because no commit was made"`
+	Commit  string `json:"commit,omitempty" jsonschema:"the id of the commit that satisfies the task, 7 to 40 hexadecimal digits; give branch with it, and use only for work that changed a repository; otherwise omit both commit and branch"`
+	Branch  string `json:"branch,omitempty" jsonschema:"the non-empty branch that commit is on; give commit with it, and use only for work that changed a repository; otherwise omit both commit and branch"`
 }
 
 type noArgs struct{}
@@ -299,10 +307,33 @@ func (r *room) result(ctx context.Context, _ *mcp.CallToolRequest, in taskArgs) 
 	if !res.Msg.Closed {
 		return said(fmt.Sprintf("Task %s is not done yet (%s).", in.Task, res.Msg.Status)), nil, nil
 	}
-	if strings.TrimSpace(res.Msg.Result) == "" {
-		return said("Task " + in.Task + " is closed, and the worker left nothing."), nil, nil
+	var outcome string
+	switch res.Msg.Outcome {
+	case "no-op":
+		outcome = "no-op — carried out, with a result and no change committed"
+	case "shipped":
+		outcome = "shipped — carried out, with a commit and its branch recorded"
+	case "blocked":
+		outcome = "blocked — the worker could not carry out the task"
+	case "abandoned":
+		outcome = "abandoned — failed: the server ended the worker's session before it gave a result"
+	default:
+		if strings.TrimSpace(res.Msg.Result) == "" {
+			return said("Task " + in.Task + " is closed, and the worker left nothing."), nil, nil
+		}
+		return said(res.Msg.Result), nil, nil
 	}
-	return said(res.Msg.Result), nil, nil
+	answer := fmt.Sprintf("Task %s is closed. Outcome: %s.", in.Task, outcome)
+	if res.Msg.Outcome == "abandoned" {
+		if strings.TrimSpace(res.Msg.Result) == "" {
+			return said(answer + "\nThe server gave no reason."), nil, nil
+		}
+		return said(answer + "\nReason from the server:\n" + res.Msg.Result), nil, nil
+	}
+	if strings.TrimSpace(res.Msg.Result) == "" {
+		return said(answer + "\nThe worker left no result."), nil, nil
+	}
+	return said(answer + "\nWorker's result:\n" + res.Msg.Result), nil, nil
 }
 
 func (r *room) claim(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
@@ -318,10 +349,36 @@ func (r *room) claim(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mc
 	return said("Task " + res.Msg.TaskId + ":\n" + res.Msg.Text), nil, nil
 }
 
+func isCommitID(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *room) done(ctx context.Context, _ *mcp.CallToolRequest, in doneArgs) (*mcp.CallToolResult, any, error) {
+	if in.Blocked && (in.Commit != "" || in.Branch != "") {
+		return refused(errors.New("a blocked task records no commit: put it in the result")), nil, nil
+	}
+	if !in.Blocked && (in.Commit == "") != (in.Branch == "") {
+		return refused(errors.New("a commit and its branch are given together or not at all")), nil, nil
+	}
+	if in.Commit != "" && !isCommitID(in.Commit) {
+		return refused(errors.New("commit is not an id of 7 to 40 hexadecimal digits: give the commit's id and its branch, or omit both")), nil, nil
+	}
+	if in.Branch != "" && strings.TrimSpace(in.Branch) == "" {
+		return refused(errors.New("branch is empty after trimming: give the branch the commit is on, or omit both commit and branch")), nil, nil
+	}
 	ctx, cancel := call(ctx)
 	defer cancel()
-	if _, err := r.rpc.Done(ctx, connect.NewRequest(&roomcityv1.DoneRequest{Session: r.session, Result: in.Result})); err != nil {
+	req := &roomcityv1.DoneRequest{Session: r.session, Result: in.Result, Blocked: in.Blocked, Commit: in.Commit, Branch: in.Branch}
+	if _, err := r.rpc.Done(ctx, connect.NewRequest(req)); err != nil {
 		return refused(fmt.Errorf("the task was not closed: %s", reason(err))), nil, nil
 	}
 	return said("The task is closed; this session is ending."), nil, nil
