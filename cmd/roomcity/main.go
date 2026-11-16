@@ -62,8 +62,8 @@ type command func(ctx context.Context, args []string, p process) int
 
 // commands holds every command of the binary.
 var commands = map[string]command{
-	"runtime": notImplemented("runtime"),
-	"server":  notImplemented("server"),
+	"runtime": runRuntime,
+	"server":  runServer,
 	"host":    runHost,
 	"gc":      runGc,
 }

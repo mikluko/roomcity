@@ -12,14 +12,21 @@ test "$(id -u)" = 1000
 
 roomcity -h
 
-# Each command exists and does nothing: it fails with 1, never with gc's
-# "unknown operation" 2.
-expect_not_implemented() {
+# The runtime command has no server address and the server no configuration
+# here: each says so, with 1, never with gc's "unknown operation" 2.
+expect_unset_runtime_url() {
+  rc=0
+  env -u ROOMCITY_RUNTIME_URL "$@" 2>/tmp/stderr || rc=$?
+  cat /tmp/stderr
+  test "$rc" = 1
+  grep -q 'ROOMCITY_RUNTIME_URL is not set$' /tmp/stderr
+}
+expect_no_configuration() {
   rc=0
   "$@" 2>/tmp/stderr || rc=$?
   cat /tmp/stderr
   test "$rc" = 1
-  grep -q ': not implemented$' /tmp/stderr
+  grep -q '^roomcity server: ' /tmp/stderr
 }
 # The stand-in gc and the host have no session here: each says so, with 1.
 expect_unset_session() {
@@ -29,11 +36,11 @@ expect_unset_session() {
   test "$rc" = 1
   grep -q 'ROOMCITY_SESSION is not set$' /tmp/stderr
 }
-expect_not_implemented roomcity runtime protocol
-expect_not_implemented roomcity server
+expect_unset_runtime_url roomcity runtime protocol
+expect_no_configuration roomcity server -config /nonexistent/roomcity.toml
 expect_unset_session roomcity host
 expect_unset_session roomcity gc version
-expect_not_implemented gc-runtime-room protocol
+expect_unset_runtime_url gc-runtime-room protocol
 expect_unset_session /usr/local/lib/roomcity/bin/gc version
 
 gc version

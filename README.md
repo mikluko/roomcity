@@ -3,8 +3,7 @@
 roomcity is a [Gas City](https://github.com/gastownhall/gascity) pack that adds the session runtime `room`.
 The runtime is to drive each agent session over the [Agent Client Protocol](https://github.com/agentclientprotocol), with no terminal, and to give each session a chat room as its interface.
 
-Nothing of that works yet.
-This version holds the parts and none of their behaviour: every command of the binary fails with "not implemented".
+Every command of the binary does its part; a session has not yet been run end to end in a city.
 
 ## The parts
 

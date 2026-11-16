@@ -28,11 +28,10 @@ func TestRun(t *testing.T) {
 		{"no argv", nil, exitUsage, "", usage},
 		{"help", []string{"roomcity", "-h"}, exitOK, usage, ""},
 		{"unknown command", []string{"roomcity", "attach"}, exitUsage, "", "roomcity: unknown command \"attach\"\n" + usage},
-		{"runtime", []string{"roomcity", "runtime", "protocol"}, exitFailure, "", "roomcity runtime: not implemented\n"},
-		{"server", []string{"roomcity", "server"}, exitFailure, "", "roomcity server: not implemented\n"},
+		{"runtime", []string{"roomcity", "runtime", "protocol"}, exitFailure, "", "roomcity runtime: ROOMCITY_RUNTIME_URL is not set\n"},
 		{"host", []string{"roomcity", "host"}, exitFailure, "", "roomcity host: ROOMCITY_SESSION is not set\n"},
 		{"gc", []string{"roomcity", "gc", "prime"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},
-		{"as gc-runtime-room", []string{"/usr/local/bin/gc-runtime-room", "start", "host"}, exitFailure, "", "roomcity runtime: not implemented\n"},
+		{"as gc-runtime-room", []string{"/usr/local/bin/gc-runtime-room", "start", "host"}, exitFailure, "", "roomcity runtime: ROOMCITY_RUNTIME_URL is not set\n"},
 		{"as gc", []string{"/usr/local/lib/roomcity/bin/gc", "hook"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},
 		{"as gc, no arguments", []string{"gc"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},
 		{"as gc, asked for help", []string{"gc", "-h"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},
@@ -46,6 +45,20 @@ func TestRun(t *testing.T) {
 			require.Equal(t, tt.stderr, stderr.String())
 		})
 	}
+}
+
+func TestServerNeedsAConfigurationItCanRead(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run(context.Background(), []string{"roomcity", "server", "-config", "/nonexistent/roomcity.toml"}, process{Stdout: &bytes.Buffer{}, Stderr: &stderr})
+	require.Equal(t, exitFailure, code)
+	require.Contains(t, stderr.String(), "roomcity server: open /nonexistent/roomcity.toml")
+
+	stderr.Reset()
+	bad := filepath.Join(t.TempDir(), "roomcity.toml")
+	require.NoError(t, os.WriteFile(bad, []byte("listn = 1\n"), 0o644))
+	code = run(context.Background(), []string{"roomcity", "server"}, process{Stdout: &bytes.Buffer{}, Stderr: &stderr, Env: []string{"ROOMCITY_CONFIG=" + bad}})
+	require.Equal(t, exitFailure, code)
+	require.Contains(t, stderr.String(), "listn")
 }
 
 func TestStandInGcEndsWithTheServersGcCode(t *testing.T) {
