@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,10 +20,87 @@ import (
 // agent is a running ACP agent: what the host reads of it, what it writes,
 // and the end of it, which carries what ended it.
 type agent struct {
-	r    io.Reader
-	w    io.WriteCloser
-	done chan error
+	r io.Reader
+	w io.WriteCloser
+	// ended is closed when the agent has ended, and err is then how.
+	ended chan struct{}
+	err   error
+	// stderr holds the last of what a process agent wrote on its standard
+	// error; nil for the agent in this process.
+	stderr *tail
 }
+
+func newAgent(r io.Reader, w io.WriteCloser) *agent {
+	return &agent{r: r, w: w, ended: make(chan struct{})}
+}
+
+func (a *agent) end(err error) {
+	a.err = err
+	close(a.ended)
+}
+
+// wait returns how the agent ended, and false when it has not within d.
+func (a *agent) wait(d time.Duration) (error, bool) {
+	select {
+	case <-a.ended:
+		return a.err, true
+	case <-time.After(d):
+		return nil, false
+	}
+}
+
+// tail keeps the last size bytes written to it.
+type tail struct {
+	mu   sync.Mutex
+	size int
+	b    []byte
+}
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.b = append(t.b, p...)
+	if len(t.b) > t.size {
+		t.b = t.b[len(t.b)-t.size:]
+	}
+	return len(p), nil
+}
+
+func (t *tail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(string(t.b))
+}
+
+// whyEnded says what the agent had to tell of its end: how it ended, and the
+// last of its standard error. An agent that has not ended within a moment is
+// not blamed. The text goes into the host's error and its log, so that a host
+// whose agent died at once does not say only that the connection closed.
+func (a *agent) whyEnded() string {
+	err, ended := a.wait(agentWordGrace)
+	var parts []string
+	switch {
+	case !ended:
+		return ""
+	case err != nil:
+		parts = append(parts, "the agent ended: "+err.Error())
+	default:
+		parts = append(parts, "the agent ended without an error")
+	}
+	if a.stderr != nil {
+		if s := a.stderr.String(); s != "" {
+			parts = append(parts, "its standard error: "+s)
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// agentWordGrace is how long the host waits for an agent that closed its
+// connection to be seen to end.
+const agentWordGrace = 5 * time.Second
+
+// stderrTail is how much of an agent's standard error an error keeps.
+const stderrTail = 4 << 10
 
 // SecretPrefix starts the name of each variable of the host's environment that
 // names a file holding a secret of the agent: ROOMCITY_SECRET_<NAME>=<path>
@@ -68,6 +146,9 @@ func runsClaude(command []string) bool {
 func (h *host) startAgent(ctx context.Context, command []string) (*agent, error) {
 	if runsClaude(command) {
 		cfg := h.cfg.Claude
+		if cfg.Log == nil {
+			cfg.Log = h.log
+		}
 		if len(command) > 1 {
 			cfg.ClaudeArgs = append(append([]string(nil), cfg.ClaudeArgs...), command[1:]...)
 		}
@@ -91,11 +172,11 @@ func (h *host) startAgent(ctx context.Context, command []string) (*agent, error)
 func (h *host) startClaude(ctx context.Context, cfg claudeacp.Config) *agent {
 	toAgentR, toAgentW := io.Pipe()
 	fromAgentR, fromAgentW := io.Pipe()
-	a := &agent{r: fromAgentR, w: toAgentW, done: make(chan error, 1)}
+	a := newAgent(fromAgentR, toAgentW)
 	go func() {
 		err := claudeacp.Serve(ctx, toAgentR, fromAgentW, cfg)
 		_ = fromAgentW.Close()
-		a.done <- err
+		a.end(err)
 	}()
 	return a
 }
@@ -143,15 +224,17 @@ func (h *host) startProcess(ctx context.Context, command []string) (*agent, erro
 		_ = stderr.Close()
 		return nil, fmt.Errorf("host: starting %s: %w", command[0], err)
 	}
+	a := newAgent(stdout, stdin)
+	a.stderr = &tail{size: stderrTail}
 	go func() {
 		defer func() { _ = stderr.Close() }()
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
 		for sc.Scan() {
+			_, _ = a.stderr.Write(append(sc.Bytes(), '\n'))
 			h.log.Info("agent", "stderr", sc.Text())
 		}
 	}()
-	a := &agent{r: stdout, w: stdin, done: make(chan error, 1)}
-	go func() { a.done <- cmd.Wait() }()
+	go func() { a.end(cmd.Wait()) }()
 	return a, nil
 }

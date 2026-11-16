@@ -47,7 +47,7 @@ func TestAProcessAgentGetsTheSecretFromItsFile(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "kimi-key", string(got))
-	<-ag.done
+	<-ag.ended
 }
 
 func TestAProcessAgentIsNotStartedWhenItsSecretFileIsMissing(t *testing.T) {

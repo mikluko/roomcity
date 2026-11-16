@@ -197,6 +197,12 @@ func (h *host) run(ctx context.Context) error {
 	wg.Go(func() { h.report(ctx) })
 
 	err = h.session(ctx)
+	if err != nil {
+		if why := ag.whyEnded(); why != "" {
+			err = fmt.Errorf("%w (%s)", err, why)
+			h.log.Error("the agent ended while the session was starting", "why", why)
+		}
+	}
 	if err == nil {
 		_ = h.runCommands(ctx, manifest.SessionSetup, false)
 		h.runScript(ctx, manifest.SessionSetupScript)
@@ -207,13 +213,18 @@ func (h *host) run(ctx context.Context) error {
 		case <-conn.Done():
 			if ctx.Err() == nil {
 				err = fmt.Errorf("host: the agent's connection ended: %w", errors.Unwrap(conn.Err()))
+				if why := ag.whyEnded(); why != "" {
+					err = fmt.Errorf("%w (%s)", err, why)
+					h.log.Error("the agent ended", "why", why)
+				}
 			}
 		}
 	}
 	ended := ctx.Err() != nil
 	cancel()
 	_ = ag.w.Close()
-	sErr := <-ag.done
+	<-ag.ended
+	sErr := ag.err
 	wg.Wait()
 	h.flush()
 	h.mu.Lock()

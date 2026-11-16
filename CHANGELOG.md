@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `roomcity server` starts the chat side. It had mounted the three services and the transcripts' page and nothing of the rooms, so no room appeared and the homeserver's transactions were answered 404. With `[matrix]` in `roomcity.toml` the server now makes the Matrix driver from it and the tokens in `as_token_file` and `hs_token_file`, mounts the driver's handler at `/_matrix/app/` on the network listener, and runs the chat service beside it, with the transcripts' address from `[chat]`. A `[chat]` without its `[matrix]`, or tokens it cannot read, stops the start with an error.
+- A host whose agent ended before or while the session started now says why: how the agent ended, and for a process the last of its standard error, in its error and its log, instead of only that the connection closed.
 
 ## [0.2.0] - 2026-11-16
 

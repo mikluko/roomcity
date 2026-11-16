@@ -147,9 +147,33 @@ func TestWhatAProcessWroteBeforeItEndedIsStillReadable(t *testing.T) {
 
 	ag, err := h.startProcess(context.Background(), []string{"sh", "-c", "printf 'last words\\n'"})
 	require.NoError(t, err)
-	require.NoError(t, <-ag.done) // the process has ended and been waited for
+	<-ag.ended // the process has ended and been waited for
+	require.NoError(t, ag.err)
 
 	got, err := io.ReadAll(ag.r)
 	require.NoError(t, err)
 	require.Equal(t, "last words\n", string(got))
+}
+
+func TestAnAgentThatEndsAtOnceIsAskedWhyAndSays(t *testing.T) {
+	server, url := newFakeServer(t)
+	server.stageWith(&roomcityv1.StageManifest{Command: []string{"sh", "-c", "echo 'cannot make the config directory' >&2; exit 3"}}, nil)
+
+	err := Run(context.Background(), Config{Session: "s", Token: testToken, Server: url, WorkDir: t.TempDir(),
+		Claude: claudeacp.Config{CLIPath: "/never"}, Retry: time.Millisecond})
+
+	require.ErrorContains(t, err, "connection closed")
+	require.ErrorContains(t, err, "exit status 3")
+	require.ErrorContains(t, err, "cannot make the config directory")
+}
+
+func TestClaudeThatRefusesItsArgumentsSaysSo(t *testing.T) {
+	server, url := newFakeServer(t)
+	server.stageWith(&roomcityv1.StageManifest{Command: []string{"claude", "--bg"}}, nil)
+
+	err := Run(context.Background(), Config{Session: "s", Token: testToken, Server: url, WorkDir: t.TempDir(),
+		Claude: claudeacp.Config{CLIPath: "/never"}, Retry: time.Millisecond})
+
+	require.ErrorContains(t, err, "the agent ended")
+	require.ErrorContains(t, err, "--bg")
 }
