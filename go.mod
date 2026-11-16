@@ -9,8 +9,10 @@ tool (
 
 require (
 	connectrpc.com/connect v1.21.1
+	github.com/afrase/acp-go v0.2.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12
+	sarak.sh/mikluko/claudeacp v0.6.0
 )
 
 require go.yaml.in/yaml/v3 v3.0.5 // indirect

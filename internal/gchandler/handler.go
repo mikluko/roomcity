@@ -50,12 +50,14 @@ func New(cfg Config) *Handler {
 	return &Handler{cfg: cfg}
 }
 
-// Run runs gc once, for a session that proves itself by its token. A gc that ends with a non-zero code is an answer; a gc
+// Run runs gc once, for a session that proves itself by its token. A call
+// with no session or no token is refused before Authorize is asked. A gc that ends with a non-zero code is an answer; a gc
 // that does not start is an error. Only the session's GC_* variables are
 // taken from the request, over the handler's own environment.
 func (h *Handler) Run(ctx context.Context, req *connect.Request[roomcityv1.RunRequest]) (*connect.Response[roomcityv1.RunResponse], error) {
 	msg := req.Msg
-	if h.cfg.Authorize == nil || !h.cfg.Authorize(msg.Session, sessionauth.Token(req.Header())) {
+	token := sessionauth.Token(req.Header())
+	if msg.Session == "" || token == "" || h.cfg.Authorize == nil || !h.cfg.Authorize(msg.Session, token) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the session's token is missing or not its own"))
 	}
 	cmd := exec.CommandContext(ctx, h.cfg.GcPath, msg.Args...)

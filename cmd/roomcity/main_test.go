@@ -30,7 +30,7 @@ func TestRun(t *testing.T) {
 		{"unknown command", []string{"roomcity", "attach"}, exitUsage, "", "roomcity: unknown command \"attach\"\n" + usage},
 		{"runtime", []string{"roomcity", "runtime", "protocol"}, exitFailure, "", "roomcity runtime: not implemented\n"},
 		{"server", []string{"roomcity", "server"}, exitFailure, "", "roomcity server: not implemented\n"},
-		{"host", []string{"roomcity", "host"}, exitFailure, "", "roomcity host: not implemented\n"},
+		{"host", []string{"roomcity", "host"}, exitFailure, "", "roomcity host: ROOMCITY_SESSION is not set\n"},
 		{"gc", []string{"roomcity", "gc", "prime"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},
 		{"as gc-runtime-room", []string{"/usr/local/bin/gc-runtime-room", "start", "host"}, exitFailure, "", "roomcity runtime: not implemented\n"},
 		{"as gc", []string{"/usr/local/lib/roomcity/bin/gc", "hook"}, exitFailure, "", "gc: ROOMCITY_SESSION is not set\n"},

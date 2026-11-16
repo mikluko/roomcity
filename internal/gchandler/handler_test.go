@@ -119,3 +119,18 @@ func TestNoAuthorizeRefusesEverything(t *testing.T) {
 
 	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
 }
+
+func TestRunRefusesAnEmptySessionOrTokenWhateverAuthorizeSays(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "ran")
+	h := New(Config{CityDir: t.TempDir(), GcPath: fakeGc(t, `touch `+ran), Authorize: func(string, string) bool { return true }})
+
+	noToken := connect.NewRequest(&roomcityv1.RunRequest{Session: "s"})
+	noSession := connect.NewRequest(&roomcityv1.RunRequest{})
+	sessionauth.Set(noSession.Header(), token)
+
+	for name, req := range map[string]*connect.Request[roomcityv1.RunRequest]{"no token": noToken, "no session": noSession} {
+		_, err := h.Run(context.Background(), req)
+		require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), name)
+	}
+	require.NoFileExists(t, ran)
+}

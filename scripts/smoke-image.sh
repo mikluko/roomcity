@@ -21,7 +21,7 @@ expect_not_implemented() {
   test "$rc" = 1
   grep -q ': not implemented$' /tmp/stderr
 }
-# The stand-in gc has no session to speak for here: it says so, with 1.
+# The stand-in gc and the host have no session here: each says so, with 1.
 expect_unset_session() {
   rc=0
   env -u ROOMCITY_SESSION "$@" 2>/tmp/stderr || rc=$?
@@ -31,7 +31,7 @@ expect_unset_session() {
 }
 expect_not_implemented roomcity runtime protocol
 expect_not_implemented roomcity server
-expect_not_implemented roomcity host
+expect_unset_session roomcity host
 expect_unset_session roomcity gc version
 expect_not_implemented gc-runtime-room protocol
 expect_unset_session /usr/local/lib/roomcity/bin/gc version

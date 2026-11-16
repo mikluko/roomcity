@@ -64,7 +64,7 @@ type command func(ctx context.Context, args []string, p process) int
 var commands = map[string]command{
 	"runtime": notImplemented("runtime"),
 	"server":  notImplemented("server"),
-	"host":    notImplemented("host"),
+	"host":    runHost,
 	"gc":      runGc,
 }
 
