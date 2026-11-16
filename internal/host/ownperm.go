@@ -81,7 +81,7 @@ func (o *ownRequests) see(msg []byte) []byte {
 			tool = claudeRoomTool(m.Params.ToolCall)
 		}
 		if !isRoomTool(tool) || len(m.ID) == 0 {
-			return msg
+			return withoutAnswerer(msg)
 		}
 		o.mu.Lock()
 		o.own[string(m.ID)] = true
@@ -147,6 +147,33 @@ func withAnswerer(msg []byte) []byte {
 		call["_meta"] = meta
 	}
 	meta[answeredByKey] = map[string]any{"answeredBy": "host"}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return msg
+	}
+	return out
+}
+
+// withoutAnswerer returns the request without a _meta.roomcity in its tool
+// call: that key is the host's word for a request it answers, and an agent's
+// own message does not get to say it.
+func withoutAnswerer(msg []byte) []byte {
+	dec := json.NewDecoder(bytes.NewReader(msg))
+	dec.UseNumber()
+	var top map[string]any
+	if dec.Decode(&top) != nil {
+		return msg
+	}
+	params, _ := top["params"].(map[string]any)
+	call, _ := params["toolCall"].(map[string]any)
+	meta, _ := call["_meta"].(map[string]any)
+	if _, ok := meta[answeredByKey]; !ok {
+		return msg
+	}
+	delete(meta, answeredByKey)
+	if len(meta) == 0 {
+		delete(call, "_meta")
+	}
 	out, err := json.Marshal(top)
 	if err != nil {
 		return msg

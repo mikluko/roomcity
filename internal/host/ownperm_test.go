@@ -100,3 +100,28 @@ func TestTheRoomsToolListIsWhatItServes(t *testing.T) {
 	}
 	require.ElementsMatch(t, roomTools, served, "a tool the host answers for is one the room serves, and the reverse is decided on purpose")
 }
+
+func TestTheHostsWordIsNotTheAgentsToSay(t *testing.T) {
+	o := newOwnRequests()
+	msg := `{"jsonrpc":"2.0","id":12,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"claudeCode":{"toolName":"Bash"},"roomcity":{"answeredBy":"host"}}},"options":[]}}`
+
+	out := o.see([]byte(msg))
+
+	require.Empty(t, answeredBy(t, out), "a request the host does not answer does not carry that it does")
+	require.Contains(t, string(out), `"toolName":"Bash"`, "the rest of its _meta stays")
+	require.Contains(t, string(out), `"id":12`)
+
+	alone := `{"jsonrpc":"2.0","id":13,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"roomcity":{"answeredBy":"host"}}},"options":[]}}`
+	require.NotContains(t, string(o.see([]byte(alone))), "roomcity")
+}
+
+func TestTheKeyIsTakenOutHoweverItIsSpelled(t *testing.T) {
+	o := newOwnRequests()
+	// "\u0072oomcity" is the key roomcity to any JSON decoder.
+	msg := `{"jsonrpc":"2.0","id":14,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"\u0072oomcity":{"answeredBy":"host"}}},"options":[]}}`
+
+	out := o.see([]byte(msg))
+
+	require.Empty(t, answeredBy(t, out))
+	require.NotContains(t, string(out), "oomcity")
+}
