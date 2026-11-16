@@ -12,7 +12,7 @@ version = "sha:e38ce9cc55d15fa351199c042f0d07aba1a347af"
 
 [imports.roomcity]
 source = "https://sarak.sh/mikluko/roomcity.git"
-version = "^0.9"
+version = "^0.10"
 
 [[named_session]]
 template = "host"
