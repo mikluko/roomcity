@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-16
+
 ### Fixed
 
 - `inventory` of a city that holds no box answers `"sessions":[]` and not `"sessions":null`, which gc read as an answer without sessions and refused, so that no session of the city could start.
@@ -72,7 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.0...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.1...HEAD
+[0.3.1]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.1
 [0.3.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.0
 [0.2.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.2.0
 [0.1.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.1.0
