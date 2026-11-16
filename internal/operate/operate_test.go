@@ -203,6 +203,28 @@ func (h *host) run(ctx context.Context, reg *session.Registry, spec operate.JobS
 	}
 }
 
+func TestASessionOfAPoolIsTheAgentsOfItsTemplateNotOfItsInstance(t *testing.T) {
+	f := newFixture(t, operate.Config{Tools: func(a string) []string {
+		if a == "worker" {
+			return []string{"claim", "done"}
+		}
+		return nil
+	}})
+	h := &host{got: make(chan session.Instruction, 8), frames: recording(t)}
+	f.jobs.onCreate = func(spec operate.JobSpec) { go h.run(f.ctx, f.reg, spec, true) }
+
+	env := map[string]string{"GC_AGENT": "sa-wisp-sbd2z", "GC_TEMPLATE": "worker", "GC_SESSION_ID": "gc-8", "GC_CITY_PATH": "/city"}
+	r := f.do("start", f.startConfig(map[string]any{"env": env}), "worker-sa-wisp-sbd2z")
+	require.Zero(t, r.ExitCode, string(r.Stderr))
+
+	info, err := f.reg.Get(f.ctx, "worker-sa-wisp-sbd2z")
+	require.NoError(t, err)
+	require.Equal(t, "worker", info.Agent, "one agent for every task, not one for each")
+	require.Len(t, f.jobs.created, 1)
+	require.Equal(t, "worker", f.jobs.created[0].Agent, "the agent's own Secrets are found by it")
+	require.Equal(t, "claim,done", f.jobs.created[0].Env[operate.ToolsEnv])
+}
+
 func TestStartMakesAJobAndReturnsOnlyAfterTheAgentAnswered(t *testing.T) {
 	f := newFixture(t, operate.Config{
 		AlwaysOn: func(a string) bool { return a == "host" },

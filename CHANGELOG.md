@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The host gives the Claude Code it runs its to-do tools (claudeacp v0.7.0's `Config.TaskTools`, which sets `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` unless the environment already has it), so that Claude's task list reaches the room as a plan; a claude run with no terminal has none otherwise. A city that set the variable itself in its claude provider no longer needs to: its own value, `0` included, is kept.
 
+### Fixed
+
+- A session of a pool belongs to its agent by the agent's template (`GC_TEMPLATE`), not by `GC_AGENT`, which names the instance, one for each task: `[agents.worker]`, with its Secrets and `always_on`, now applies to the sessions of the pool `worker`, which got none of them, so that a worker's goose started without its key; the session's agent in the registry, and so in the rooms and the journal, is `worker` and not the id of the task's bead.
+
 ## [0.9.0] - 2026-11-16
 
 ### Added

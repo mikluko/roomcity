@@ -98,6 +98,17 @@ type Config struct {
 	Log *slog.Logger
 }
 
+// agentOf is the name of the agent a session runs, as the configuration and
+// the rooms know it: the template. GC_AGENT names the instance, which for a
+// session of a pool is its own, one for each task; GC_TEMPLATE is the agent's
+// name whatever the instance, and the same as GC_AGENT for a named session.
+func agentOf(env map[string]string) string {
+	if t := env["GC_TEMPLATE"]; t != "" {
+		return t
+	}
+	return env["GC_AGENT"]
+}
+
 // ToolsEnv is the variable of the session's pod that names, by commas, the
 // tools of the room it has besides attach.
 const ToolsEnv = "ROOMCITY_ROOM_TOOLS"
@@ -407,7 +418,8 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	} else if alive {
 		return failf("start %s: session already exists", name)
 	}
-	if o.cfg.IsProcess != nil && o.cfg.IsProcess(sc.Env["GC_AGENT"]) {
+	agent := agentOf(sc.Env)
+	if o.cfg.IsProcess != nil && o.cfg.IsProcess(agent) {
 		return o.startProcess(ctx, name, sc)
 	}
 	manifest, archive, err := sc.bundle()
@@ -415,7 +427,6 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 		return failf("start %s: %v", name, err)
 	}
 
-	agent := sc.Env["GC_AGENT"]
 	kind := session.Task
 	if o.cfg.AlwaysOn(agent) {
 		kind = session.AlwaysOn

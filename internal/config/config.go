@@ -72,7 +72,7 @@ type Agent struct {
 	// Process says that what gc starts for this agent is no agent session
 	// but a service, which the server runs as a process of its own, with no
 	// room. The table's name is a pattern (path.Match) of the agent's name
-	// as gc gives it in GC_AGENT, so "core.*" names every service of the
+	// as gc gives it in GC_TEMPLATE (GC_AGENT when gc sets none), so "core.*" names every service of the
 	// core pack.
 	Process bool `toml:"process"`
 	// Secrets are mounted in the pods of this agent's sessions and of no
