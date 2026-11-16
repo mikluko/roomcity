@@ -32,10 +32,10 @@ func TestTranscriptsPastTheirTermAreRemovedNowAndThen(t *testing.T) {
 		close(done)
 	}()
 	require.Eventually(t, func() bool {
-		_, _, err := reg.Transcript(ctx, "old")
+		_, _, err := reg.Transcript(ctx, "old", 0)
 		return err == session.ErrNotFound
 	}, 5*time.Second, 10*time.Millisecond)
-	_, _, err = reg.Transcript(ctx, "running")
+	_, _, err = reg.Transcript(ctx, "running", 0)
 	require.NoError(t, err, "a session still running is never removed")
 
 	stop()

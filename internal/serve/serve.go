@@ -103,8 +103,8 @@ func resetter(cfg config.Config) func(ctx context.Context, gcID string) error {
 // come afterwards, on their own.
 const resetTimeout = 30 * time.Second
 
-// purgeTranscripts removes the transcripts of sessions that ended more than
-// term ago, now and then, until ctx ends.
+// purgeTranscripts removes the transcripts of starts that ended more than
+// term ago, each start by its own end, now and then, until ctx ends.
 func purgeTranscripts(ctx context.Context, reg *session.Registry, term, every time.Duration, log *slog.Logger) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
@@ -116,7 +116,7 @@ func purgeTranscripts(ctx context.Context, reg *session.Registry, term, every ti
 		case err != nil:
 			log.Error("removing the transcripts past their term", "err", err)
 		case n > 0:
-			log.Info("removed the transcripts past their term", "sessions", n)
+			log.Info("removed the transcripts past their term", "starts", n)
 		}
 		select {
 		case <-tick.C:

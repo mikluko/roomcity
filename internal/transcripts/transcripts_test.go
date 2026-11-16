@@ -75,7 +75,7 @@ func TestPageGivesAFinishedSessionWhole(t *testing.T) {
 	require.Contains(t, body, "count the words", "the owner's own words")
 	require.Contains(t, body, "Run it", "the tool call")
 	require.Contains(t, body, strings.Repeat("o", 9000), "the output a room would cut at 4000 bytes, whole")
-	require.Contains(t, body, "/-/s-worker%201/raw", "the link to the raw stream")
+	require.Contains(t, body, "/-/s-worker%201/1/raw", "the link to the raw stream of the start")
 }
 
 func TestPageEscapesWhatTheAgentWrote(t *testing.T) {

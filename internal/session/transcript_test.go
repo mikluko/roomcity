@@ -32,7 +32,7 @@ func TestTranscriptHoldsTheWholeStreamWithItsTimesAndTheCard(t *testing.T) {
 	before := time.Now()
 	finishedSession(t, r, "s")
 
-	card, entries, err := r.Transcript(ctx, "s")
+	card, entries, err := r.Transcript(ctx, "s", 0)
 	require.NoError(t, err)
 	require.Equal(t, session.Info{Name: "s", Agent: "worker", Kind: session.Task, State: session.Ended}, card.Info)
 	require.False(t, card.Began.Before(before.Add(-time.Second)))
@@ -56,7 +56,7 @@ func TestTranscriptHoldsTheWholeStreamWithItsTimesAndTheCard(t *testing.T) {
 	// The prompt was never delivered: the end closes its record.
 	require.Equal(t, []string{"lifecycle", "prompt", "frame", "frame", "prompt", "lifecycle"}, kinds)
 
-	_, _, err = r.Transcript(ctx, "nobody")
+	_, _, err = r.Transcript(ctx, "nobody", 0)
 	require.ErrorIs(t, err, session.ErrNotFound)
 }
 
@@ -71,15 +71,15 @@ func TestPurgeRemovesWhatEndedBeforeTheTimeAndNothingElse(t *testing.T) {
 	n, err := r.Purge(ctx, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 	require.Zero(t, n, "nothing ended before an hour ago")
-	_, _, err = r.Transcript(ctx, "old")
+	_, _, err = r.Transcript(ctx, "old", 0)
 	require.NoError(t, err)
 
 	n, err = r.Purge(ctx, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the ended session goes, the running one stays")
-	_, _, err = r.Transcript(ctx, "old")
+	_, _, err = r.Transcript(ctx, "old", 0)
 	require.ErrorIs(t, err, session.ErrNotFound)
-	_, _, err = r.Transcript(ctx, "running")
+	_, _, err = r.Transcript(ctx, "running", 0)
 	require.NoError(t, err)
 
 	mark, err := r.Mark(ctx, "old", "k")

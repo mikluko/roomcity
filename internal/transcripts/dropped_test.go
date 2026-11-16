@@ -17,7 +17,7 @@ type fixed struct{ entries []session.Entry }
 
 func (fixed) List(context.Context) ([]session.Info, error) { return nil, nil }
 
-func (f fixed) Transcript(context.Context, string) (session.Card, []session.Entry, error) {
+func (f fixed) Transcript(context.Context, string, int) (session.Card, []session.Entry, error) {
 	return session.Card{Info: session.Info{Name: "s"}}, f.entries, nil
 }
 

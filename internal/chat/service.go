@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -149,6 +150,7 @@ func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.I
 	if subscribed {
 		return
 	}
+	s.recordRoom(ctx, target, info.Name)
 	events, err := s.Sessions.Subscribe(ctx, info.Name, session.FromNow)
 	if err != nil {
 		s.Log.Error("subscribing to a session", "session", info.Name, "err", err)
@@ -210,7 +212,7 @@ func (s *Service) render(ctx context.Context, t *agentSession, name string, even
 			if !ok {
 				return
 			}
-			s.journalAfresh(ctx, t, ev)
+			s.noteStart(ctx, t, name, ev)
 			r.event(ev)
 			if l, ok := ev.(session.Lifecycle); ok && l.Kind == session.Stopped && onStopped != nil {
 				onStopped()
@@ -228,11 +230,45 @@ func (s *Service) render(ctx context.Context, t *agentSession, name string, even
 	}
 }
 
-// journalAfresh tells the journal that an always-on agent's session began
-// anew, with a link to its room.
-func (s *Service) journalAfresh(ctx context.Context, t *agentSession, ev session.Event) {
-	if l, ok := ev.(session.Lifecycle); ok && l.Kind == session.StartedAfresh {
-		s.journalNotice(ctx, fmt.Sprintf("The session of **%s** began anew: [%s](%s)", t.agent, t.agent, s.Driver.Link(t.room)))
+// noteStart records the room of the start that a Lifecycle event opens, and
+// for a start afresh tells the journal, with a link to the room and to the
+// transcript of the start that just closed.
+func (s *Service) noteStart(ctx context.Context, t *agentSession, name string, ev session.Event) {
+	l, ok := ev.(session.Lifecycle)
+	if !ok || (l.Kind != session.Started && l.Kind != session.StartedAfresh) {
+		return
+	}
+	s.recordRoom(ctx, t, name)
+	if l.Kind != session.StartedAfresh {
+		return
+	}
+	body := fmt.Sprintf("The session of **%s** began anew: [%s](%s)", t.agent, t.agent, s.Driver.Link(t.room))
+	if closed, ok := s.closedBefore(ctx, name, l.Seq); ok && s.Transcripts != "" {
+		body += fmt.Sprintf(" · [the transcript of the one that ended](%s%s/%d)", s.Transcripts, url.PathEscape(name), closed)
+	}
+	s.journalNotice(ctx, body)
+}
+
+// closedBefore returns the number of the start before the one that the event
+// of that Seq opened.
+func (s *Service) closedBefore(ctx context.Context, name string, seq uint64) (int, bool) {
+	starts, err := s.Sessions.Starts(ctx, name)
+	if err != nil {
+		s.Log.Error("reading the starts of a session", "session", name, "err", err)
+		return 0, false
+	}
+	i := slices.IndexFunc(starts, func(st session.Start) bool { return st.FirstSeq == seq })
+	if i < 1 {
+		return 0, false
+	}
+	return starts[i-1].N, true
+}
+
+// recordRoom tells the registry which room the session's current start is
+// shown in.
+func (s *Service) recordRoom(ctx context.Context, t *agentSession, name string) {
+	if err := s.Sessions.SetRoom(ctx, name, string(t.room)); err != nil && !errors.Is(err, session.ErrNotFound) {
+		s.Log.Error("recording the room of a session's start", "session", name, "err", err)
 	}
 }
 

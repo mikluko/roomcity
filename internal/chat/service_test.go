@@ -355,6 +355,41 @@ func TestServiceFollowsAnAgentsSessionThatHadEndedBeforeTheServerStarted(t *test
 	require.Equal(t, 1, sessions.Subscriptions("s-host"), "and it is made once")
 }
 
+func TestServiceRecordsTheRoomOfEachStart(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(alwaysOn("host", session.Running))
+	_, _ = runService(t, sessions)
+	require.Eventually(t, func() bool { return sessions.Room("s-host") == "!host" }, 5*time.Second, 10*time.Millisecond,
+		"the start that is running when the room is found")
+
+	require.NoError(t, sessions.SetRoom(t.Context(), "s-host", ""))
+	sessions.Emit("s-host", session.Lifecycle{Seq: 7, Kind: session.StartedAfresh})
+	require.Eventually(t, func() bool { return sessions.Room("s-host") == "!host" }, 5*time.Second, 10*time.Millisecond,
+		"and the next one, when it begins")
+}
+
+func TestServiceRecordsTheRoomOfATasksStart(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(task("s-worker 1", session.Running))
+	_, _ = runService(t, sessions)
+
+	require.Eventually(t, func() bool { return sessions.Room("s-worker 1") == "!worker s-worker 1" }, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestServiceLinksTheTranscriptThatJustClosedInTheJournal(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.SetStarts("s-host", session.Start{N: 1, FirstSeq: 1, LastSeq: 6}, session.Start{N: 2, FirstSeq: 7})
+	sessions.Add(alwaysOn("host", session.Running))
+	driver, _ := runService(t, sessions)
+	require.Eventually(t, func() bool { return len(driver.roomSpecs()) == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	sessions.Emit("s-host", session.Lifecycle{Seq: 7, Kind: session.StartedAfresh})
+	require.Eventually(t, func() bool { return len(driver.messagesIn("!journal")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	body := driver.messagesIn("!journal")[0].Msg.Body
+	require.Contains(t, body, "began anew")
+	require.Contains(t, body, "(https://t/-/s-host/1)", "the start that closed, not the one that began")
+}
+
 func TestServiceTellsTheRoomWhenTheSessionBeginsAnew(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Running))

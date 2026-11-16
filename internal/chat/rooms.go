@@ -155,6 +155,7 @@ func (s *Service) startTask(ctx context.Context, wg *sync.WaitGroup, info sessio
 	s.by[room] = task.target
 	s.mu.Unlock()
 
+	s.recordRoom(ctx, task.target, info.Name)
 	events, err := s.Sessions.Subscribe(taskCtx, info.Name, session.FromNow)
 	if err != nil {
 		s.Log.Error("subscribing to a session", "session", info.Name, "err", err)

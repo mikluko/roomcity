@@ -30,9 +30,9 @@ func TestPurgeOfASessionStartedAgainSinceItWasChosenTouchesNothing(t *testing.T)
 
 	gone, err := r.purgeOne(ctx, "s", later)
 	require.NoError(t, err)
-	require.False(t, gone, "a session that is not ended is not removed")
+	require.Zero(t, gone, "a session that is not ended is not removed")
 
-	card, entries, err := r.Transcript(ctx, "s")
+	card, entries, err := r.Transcript(ctx, "s", 0)
 	require.NoError(t, err)
 	require.Equal(t, Starting, card.State)
 	require.NotEmpty(t, entries, "its events are still there")
@@ -56,8 +56,8 @@ func TestPurgeLeavesASessionThatEndedAgainJustNow(t *testing.T) {
 
 	gone, err := r.purgeOne(ctx, "s", cutoff)
 	require.NoError(t, err)
-	require.False(t, gone, "it ended after the cut-off")
+	require.Zero(t, gone, "it ended after the cut-off")
 	gone, err = r.purgeOne(ctx, "s", time.Now().Add(time.Hour))
 	require.NoError(t, err)
-	require.True(t, gone)
+	require.Equal(t, 1, gone)
 }

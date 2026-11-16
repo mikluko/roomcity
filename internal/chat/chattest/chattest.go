@@ -29,6 +29,8 @@ type Sessions struct {
 	subscribed map[string]int
 	shown      map[string]uint64
 	resets     []string
+	starts     map[string][]session.Start
+	rooms      map[string]string
 
 	// PromptErr, when set, is what Prompt returns, and the prompt is not kept.
 	PromptErr error
@@ -172,6 +174,45 @@ func (s *Sessions) ShownSeq(name string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.shown[name]
+}
+
+// SetStarts sets the starts that Starts returns for the session.
+func (s *Sessions) SetStarts(name string, starts ...session.Start) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.starts == nil {
+		s.starts = map[string][]session.Start{}
+	}
+	s.starts[name] = starts
+}
+
+// Starts implements session.Service: the starts a test set, ErrNotFound for
+// none.
+func (s *Sessions) Starts(_ context.Context, name string) ([]session.Start, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.starts[name]) == 0 {
+		return nil, session.ErrNotFound
+	}
+	return append([]session.Start(nil), s.starts[name]...), nil
+}
+
+// SetRoom implements session.Service: it records the room.
+func (s *Sessions) SetRoom(_ context.Context, name, room string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rooms == nil {
+		s.rooms = map[string]string{}
+	}
+	s.rooms[name] = room
+	return nil
+}
+
+// Room returns the room that was last recorded for the session's start.
+func (s *Sessions) Room(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rooms[name]
 }
 
 // Reset implements session.Service: it records the request.

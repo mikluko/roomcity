@@ -15,6 +15,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/yuin/goldmark"
@@ -23,14 +24,16 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/session"
 )
 
-// Prefix is where the pages are: /-/<session> for a session's transcript,
-// /-/<session>/raw for its stream as it was, and /-/ for the sessions.
+// Prefix is where the pages are: /-/<session>/<n> for the transcript of the
+// session's nth start, /-/<session> for that of its latest, each with /raw for
+// its stream as it was, and /-/ for the sessions.
 const Prefix = "/-/"
 
-// Source is where the transcripts are kept.
+// Source is where the transcripts are kept. Transcript is of the nth start of
+// a session, the latest for 0.
 type Source interface {
 	List(ctx context.Context) ([]session.Info, error)
-	Transcript(ctx context.Context, name string) (session.Card, []session.Entry, error)
+	Transcript(ctx context.Context, name string, n int) (session.Card, []session.Entry, error)
 }
 
 // Page serves the transcripts.
@@ -46,6 +49,8 @@ func (p *Page) Handler() http.Handler {
 	mux.HandleFunc("GET "+Prefix+"{$}", p.index)
 	mux.HandleFunc("GET "+Prefix+"{session}", p.transcript)
 	mux.HandleFunc("GET "+Prefix+"{session}/raw", p.raw)
+	mux.HandleFunc("GET "+Prefix+"{session}/{n}", p.transcript)
+	mux.HandleFunc("GET "+Prefix+"{session}/{n}/raw", p.raw)
 	return noStore(mux)
 }
 
@@ -102,15 +107,77 @@ func (p *Page) transcript(w http.ResponseWriter, r *http.Request) {
 		State string
 		Began string
 		Ended string
+		How   string
+		Nav   navigation
 		Items []shown
-	}{p.City, card, stateName(card.State), formatTime(card.Began), formatTime(card.Ended), items})
+	}{p.City, card, startState(card), formatTime(card.Began), formatTime(card.Ended), card.Start.How, navigate(card), items})
+}
+
+// navigation is where the links of a start's page go: to the start before and
+// the one after, and to the ends. 0 is no such start. Latest is also the
+// number of starts the session has had, which the registry may hold fewer of;
+// Total is that number, whichever start is the page's.
+type navigation struct {
+	First, Prev, Next, Latest, Total int
+}
+
+// navigate finds the neighbours and the ends of the card's start among the
+// starts the registry still holds, which may have gaps: the starts removed
+// with their term.
+func navigate(card session.Card) navigation {
+	var nav navigation
+	if len(card.Starts) == 0 {
+		return nav
+	}
+	cur := card.Start.N
+	nav.First, nav.Latest = card.Starts[0].N, card.Starts[len(card.Starts)-1].N
+	nav.Total = nav.Latest
+	for _, s := range card.Starts {
+		switch {
+		case s.N < cur:
+			nav.Prev = s.N
+		case s.N > cur && nav.Next == 0:
+			nav.Next = s.N
+		}
+	}
+	if nav.First == cur {
+		nav.First = 0
+	}
+	if nav.Latest == cur {
+		nav.Latest = 0
+	}
+	return nav
+}
+
+// startState is the state of the card's start: that of the session for its
+// latest, "ended" for one that was closed.
+func startState(card session.Card) string {
+	if !card.Start.Ended.IsZero() {
+		return "ended"
+	}
+	return stateName(card.State)
+}
+
+// number reads the start's number of the request: 0 for none, the latest.
+func number(r *http.Request) (int, bool) {
+	s := r.PathValue("n")
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil && n >= 1
 }
 
 func (p *Page) load(w http.ResponseWriter, r *http.Request) (session.Card, []session.Entry, bool) {
-	card, entries, err := p.Source.Transcript(r.Context(), r.PathValue("session"))
+	n, ok := number(r)
+	if !ok {
+		http.Error(w, "no such transcript", http.StatusNotFound)
+		return session.Card{}, nil, false
+	}
+	card, entries, err := p.Source.Transcript(r.Context(), r.PathValue("session"), n)
 	switch {
 	case errors.Is(err, session.ErrNotFound):
-		http.Error(w, "no such session, or its transcript has been removed", http.StatusNotFound)
+		http.Error(w, "no such session or start, or its transcript has been removed", http.StatusNotFound)
 		return card, nil, false
 	case err != nil:
 		http.Error(w, "the transcript could not be read", http.StatusInternalServerError)
@@ -126,7 +193,11 @@ func (p *Page) raw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+url.PathEscape(r.PathValue("session"))+`.jsonl"`)
+	name := r.PathValue("session")
+	if n := r.PathValue("n"); n != "" {
+		name += "-" + n
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+url.PathEscape(name)+`.jsonl"`)
 	enc := json.NewEncoder(w)
 	for _, e := range entries {
 		_ = enc.Encode(line(e))
@@ -222,7 +293,8 @@ summary{cursor:pointer;color:#555}
 </style>`
 
 var pathFunc = template.FuncMap{
-	"path": func(s string) string { return Prefix + url.PathEscape(s) },
+	"path":  func(s string) string { return Prefix + url.PathEscape(s) },
+	"start": func(s string, n int) string { return Prefix + url.PathEscape(s) + "/" + strconv.Itoa(n) },
 }
 
 var indexPage = template.Must(template.New("index").Funcs(pathFunc).Parse(`<!doctype html><html><head><meta charset="utf-8"><title>{{.City}}: sessions</title>` + style + `</head><body>
@@ -236,10 +308,14 @@ var transcriptPage = template.Must(template.New("transcript").Funcs(pathFunc).Pa
 <tr><td>city</td><td>{{.City}}</td></tr>
 <tr><td>agent</td><td>{{.Card.Agent}}</td></tr>
 <tr><td>session</td><td>{{.Card.Name}}</td></tr>
+<tr><td>start</td><td>{{.Card.Start.N}} of {{.Nav.Total}}{{with .Nav.First}} · <a href="{{start $.Card.Name .}}">first, {{.}}</a>{{end}}{{with .Nav.Prev}} · <a href="{{start $.Card.Name .}}">before, {{.}}</a>{{end}}{{with .Nav.Next}} · <a href="{{start $.Card.Name .}}">after, {{.}}</a>{{end}}{{with .Nav.Latest}} · <a href="{{start $.Card.Name .}}">latest, {{.}}</a>{{end}}</td></tr>
 <tr><td>state</td><td>{{.State}}</td></tr>
 <tr><td>began</td><td>{{.Began}}</td></tr>
 <tr><td>ended</td><td>{{if .Ended}}{{.Ended}}{{else}}not yet{{end}}</td></tr>
-<tr><td>stream</td><td><a href="{{path .Card.Name}}/raw">as it was, one JSON message a line</a></td></tr>
+<tr><td>how it ended</td><td>{{if .How}}{{.How}}{{else}}not yet{{end}}</td></tr>
+<tr><td>room</td><td>{{if .Card.Start.Room}}{{.Card.Start.Room}}{{else}}none recorded{{end}}</td></tr>
+<tr><td>gc's session</td><td>{{if .Card.Start.GCID}}{{.Card.Start.GCID}}{{else}}none recorded{{end}}</td></tr>
+<tr><td>stream</td><td><a href="{{start .Card.Name .Card.Start.N}}/raw">as it was, one JSON message a line</a></td></tr>
 </table>
 <hr>
 {{range .Items}}<div class="item {{.From}} {{.Kind}}"><span class="time">{{.Time}} {{.From}}</span>

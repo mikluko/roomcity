@@ -191,6 +191,11 @@ type Service interface {
 	// Info.Shown advances to it, never back, and a smaller seq changes
 	// nothing.
 	Shown(ctx context.Context, name string, seq uint64) error
+	// Starts returns the session's starts, the oldest first, and ErrNotFound
+	// for a session that has none.
+	Starts(ctx context.Context, name string) ([]Start, error)
+	// SetRoom records the chat room of the session's current start.
+	SetRoom(ctx context.Context, name, room string) error
 	// Reset starts the session afresh: gc is asked to stop it and start it
 	// again, which ends the session's current start as how "reset" and
 	// begins the next. It returns ErrNotRunning for a session that has

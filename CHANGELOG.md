@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The variables by which gc knows who is calling (`GC_AGENT`, `GC_ALIAS`, `GC_SESSION_ID`, `GC_SESSION_NAME`, `GC_TEMPLATE`, `GC_SESSION_ORIGIN`, `GC_INSTANCE_TOKEN`, `GC_CONTINUATION_EPOCH`, `GC_RUNTIME_EPOCH`, `GC_PROVIDER`, `GC_STARTUP_PROMPT_DELIVERED`) are set from what the server kept of the session's start, in the session's marks, and no longer from what each request says, so that a session cannot speak to gc as another. The first three are the marks gc itself stamps in a session's life, and are read at each call. A session started before this release has no record and is still taken at its word, until it is started again.
+- A session has one transcript for each of its starts. The page `/-/<session>/<n>` is the transcript of the nth start (and `/-/<session>/<n>/raw` its stream), `/-/<session>` the latest; the card says which start of how many, links the others, and says how the start ended (`stop`, `reset`, `failed` or `lost`), the chat room it was shown in and gc's id of the session. `Registry.Transcript` takes the start's number, 0 for the latest, and `session.Service` has `Starts` and `SetRoom`.
+- The 90 days of `transcript_term` are counted for each start from its own end: a start that is not the session's latest is removed with its events once it ended that long ago, and the session whole once its last event is that old and it has ended. `Registry.Purge` returns how many starts it removed.
+- The journal's notice that a session began anew links the transcript of the start that just closed. The chat side records the room of each start with `SetRoom`.
 
 ## [0.6.0] - 2026-11-16
 
