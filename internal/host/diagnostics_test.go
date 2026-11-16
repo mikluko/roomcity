@@ -57,6 +57,35 @@ func TestClaudeStartsWithGcsCommandOnceItsSessionFlagsAreDropped(t *testing.T) {
 	<-done
 }
 
+func TestClaudeIsGivenItsTaskToolsSoThatPlansComeToTheRoom(t *testing.T) {
+	server, url := newFakeServer(t)
+	server.stageWith(&roomcityv1.StageManifest{Command: []string{"claude"}}, nil)
+	spawned := make(chan claudeagent.Spec, 1)
+	f := claude()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Config{Session: "s", Token: testToken, Server: url, WorkDir: t.TempDir(),
+			Claude: claudeacp.Config{CLIPath: "/claude", ConfigDir: t.TempDir(), Spawn: func(ctx context.Context, s claudeagent.Spec) (*claudeagent.Proc, error) {
+				spawned <- s
+				return f.Spawn(ctx, s)
+			}}, Retry: time.Millisecond})
+	}()
+
+	server.instruct(prompt("hi"))
+	select {
+	case spec := <-spawned:
+		require.Contains(t, spec.Env, "CLAUDE_CODE_ENABLE_TODO_TOOLS=1")
+	case err := <-done:
+		t.Fatalf("the host ended: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("claude never started")
+	}
+	cancel()
+	<-done
+}
+
 func TestErrorDataShowsWhatAnACPErrorLeavesOut(t *testing.T) {
 	err := fmt.Errorf("session/new: %w", &acp.Error{Code: -32603, Message: "Internal error", Data: json.RawMessage(`{"details":"No provider configured"}`)})
 

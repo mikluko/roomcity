@@ -158,6 +158,9 @@ func runsClaude(command []string) bool {
 func (h *host) startAgent(ctx context.Context, command []string) (*agent, error) {
 	if runsClaude(command) {
 		cfg := h.cfg.Claude
+		// The tools whose calls claudeacp sends as plans: Claude Code has none
+		// without a terminal, and the room shows a plan.
+		cfg.TaskTools = true
 		if cfg.Log == nil {
 			cfg.Log = h.log
 		}
