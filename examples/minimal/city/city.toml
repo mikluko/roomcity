@@ -15,7 +15,7 @@ command = "goose"
 args = ["acp"]
 prompt_mode = "none"
 accept_startup_dialogs = false
-env = { GOOSE_PROVIDER = "openai", OPENAI_HOST = "https://api.kimi.com/coding", OPENAI_BASE_PATH = "v1/chat/completions", GOOSE_MODE = "smart_approve", GOOSE_MODEL = "kimi-for-coding" }
+env = { GOOSE_PROVIDER = "openai", OPENAI_HOST = "https://api.kimi.com/coding", OPENAI_BASE_PATH = "v1/chat/completions", GOOSE_MODE = "smart_approve", GOOSE_MODEL = "kimi-for-coding", GOOSE_TELEMETRY_ENABLED = "false" }
 
 [dolt]
 host = "dolt.dolt.svc.cluster.local"

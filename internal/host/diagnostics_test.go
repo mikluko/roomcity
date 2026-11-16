@@ -77,6 +77,11 @@ func TestClaudeIsGivenItsTaskToolsSoThatPlansComeToTheRoom(t *testing.T) {
 	select {
 	case spec := <-spawned:
 		require.Contains(t, spec.Env, "CLAUDE_CODE_ENABLE_TODO_TOOLS=1")
+		require.Contains(t, spec.Env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+		require.Contains(t, spec.Env, "DISABLE_TELEMETRY=1")
+		for _, kv := range spec.Env {
+			require.NotContains(t, kv, "CLAUDE_CODE_ENABLE_TELEMETRY=", "with no endpoint in the environment there is no export")
+		}
 	case err := <-done:
 		t.Fatalf("the host ended: %v", err)
 	case <-time.After(10 * time.Second):

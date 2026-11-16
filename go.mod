@@ -24,7 +24,7 @@ require (
 	k8s.io/client-go v0.37.2
 	maunium.net/go/mautrix v0.32.0
 	modernc.org/sqlite v1.62.0
-	sarak.sh/mikluko/claudeacp v0.7.0
+	sarak.sh/mikluko/claudeacp v0.8.1
 )
 
 require (

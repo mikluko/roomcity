@@ -102,6 +102,17 @@ which the deployment's host-path volume ignores. And what is particular to that
 cluster is left out: a node selector and tolerations, a storage class, and the
 annotations that make a certificate and a DNS record from the Ingress.
 
+## What Claude Code sends
+
+The host starts Claude Code so that it sends nothing but the model's requests: no usage metrics, error reports, feedback, surveys, update checks or feature-flag fetching. Its OpenTelemetry metrics and logs go to the OTLP endpoint the pod's environment names, and nowhere when it names none. The example names none: the endpoint is the cluster's to give, not a key of `roomcity.toml`. A cluster with the OpenTelemetry operator gives it to the pods of an agent by annotations on them, in the agent's table:
+
+```toml
+[agents.host]
+pod_annotations = { "instrumentation.opentelemetry.io/inject-sdk" = "<namespace>/<instrumentation>", "resource.opentelemetry.io/service.name" = "<city>-{agent}", "resource.opentelemetry.io/roomcity.session" = "{session}" }
+```
+
+`<namespace>/<instrumentation>` is the operator's Instrumentation that holds the collector's address; `{agent}` and `{session}` are the session's. goose sends usage data to PostHog only when `GOOSE_TELEMETRY_ENABLED` is true, by its environment or its configuration file, and it is not by default; the goose provider of `city/city.toml` sets it to `false` for every goose session, so that a file's choice in a pod does not turn it on. The one thing left to a setting of the settings file that gc passes to claude is the WebFetch hostname check (`skipWebFetchPreflight`), which sends the hostname to `api.anthropic.com` and is not turned off.
+
 ## The Secrets
 
 The manifests name six Secrets and hold none. Make them in the namespace before

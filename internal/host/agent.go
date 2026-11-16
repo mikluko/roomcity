@@ -161,6 +161,10 @@ func (h *host) startAgent(ctx context.Context, command []string) (*agent, error)
 		// The tools whose calls claudeacp sends as plans: Claude Code has none
 		// without a terminal, and the room shows a plan.
 		cfg.TaskTools = true
+		// Nothing but the model's requests leaves the pod for a third party, and
+		// Claude Code's own OpenTelemetry export goes to the endpoint the pod's
+		// environment names, if it names one.
+		cfg.NoNonessentialTraffic, cfg.ExportTelemetry = true, true
 		if cfg.Log == nil {
 			cfg.Log = h.log
 		}

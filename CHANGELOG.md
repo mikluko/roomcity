@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `[kube] pod_annotations` and `[agents.<name>] pod_annotations`: annotations put on the pods of the sessions (the agent's win by key). A value may name `{agent}` and `{session}`, which the Job's creation replaces, and a key must be one Kubernetes takes, or the configuration is refused at load. It is the way to give a session's pod what an operator reads off a pod's annotations, such as OpenTelemetry's `instrumentation.opentelemetry.io/inject-sdk` and `resource.opentelemetry.io/service.name`.
 
+### Changed
+
+- The host starts Claude Code with claudeacp v0.8.1's `NoNonessentialTraffic` and `ExportTelemetry`: it sends nothing but the model's requests (no usage metrics, error reports, feedback, surveys, update checks or feature-flag fetching; the WebFetch hostname check is a setting and is left as it is), and its OpenTelemetry metrics and logs go to the OTLP endpoint the pod's environment names, such as the one an OpenTelemetry operator injects, and nowhere if it names none.
+
 ## [0.10.0] - 2026-11-16
 
 ### Added
