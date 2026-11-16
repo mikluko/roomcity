@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -180,7 +181,7 @@ func (d *Driver) Send(ctx context.Context, room chat.RoomID, speaker string, msg
 	if err != nil {
 		return "", err
 	}
-	content := format.RenderMarkdown(msg.Body, true, false)
+	content := render(msg)
 	content.MsgType = event.MsgText
 	if msg.Kind == chat.Notice {
 		content.MsgType = event.MsgNotice
@@ -199,13 +200,26 @@ func (d *Driver) Send(ctx context.Context, room chat.RoomID, speaker string, msg
 }
 
 // React implements chat.Driver.
-func (d *Driver) React(ctx context.Context, room chat.RoomID, speaker string, to chat.MessageID, key string) error {
+func (d *Driver) React(ctx context.Context, room chat.RoomID, speaker string, to chat.MessageID, key string) (chat.ReactionID, error) {
+	intent, err := d.intent(ctx, speaker)
+	if err != nil {
+		return "", err
+	}
+	resp, err := intent.SendReaction(ctx, id.RoomID(room), id.EventID(to), key)
+	if err != nil {
+		return "", fmt.Errorf("reacting in %s: %w", room, err)
+	}
+	return chat.ReactionID(resp.EventID), nil
+}
+
+// Unreact implements chat.Driver.
+func (d *Driver) Unreact(ctx context.Context, room chat.RoomID, speaker string, reaction chat.ReactionID) error {
 	intent, err := d.intent(ctx, speaker)
 	if err != nil {
 		return err
 	}
-	if _, err := intent.SendReaction(ctx, id.RoomID(room), id.EventID(to), key); err != nil {
-		return fmt.Errorf("reacting in %s: %w", room, err)
+	if _, err := intent.RedactEvent(ctx, id.RoomID(room), id.EventID(reaction)); err != nil {
+		return fmt.Errorf("taking a reaction back in %s: %w", room, err)
 	}
 	return nil
 }
@@ -227,6 +241,11 @@ func (d *Driver) Typing(ctx context.Context, room chat.RoomID, speaker string, o
 func (d *Driver) Receive(ctx context.Context, handle func(chat.Incoming)) error {
 	d.ep.On(event.EventMessage, func(_ context.Context, evt *event.Event) {
 		if in, ok := d.incoming(evt); ok {
+			handle(in)
+		}
+	})
+	d.ep.On(event.EventReaction, func(_ context.Context, evt *event.Event) {
+		if in, ok := d.reaction(evt); ok {
 			handle(in)
 		}
 	})
@@ -272,10 +291,55 @@ func (d *Driver) incoming(evt *event.Event) (chat.Incoming, bool) {
 	}, true
 }
 
+// reaction turns a reaction on a message into a chat.Incoming, with the same
+// drops as incoming.
+func (d *Driver) reaction(evt *event.Event) (chat.Incoming, bool) {
+	if d.isOwnUser(evt.Sender) {
+		return chat.Incoming{}, false
+	}
+	d.mu.Lock()
+	_, known := d.rooms[chat.RoomID(evt.RoomID)]
+	d.mu.Unlock()
+	content := evt.Content.AsReaction()
+	if !known || content == nil || content.RelatesTo.Type != event.RelAnnotation {
+		return chat.Incoming{}, false
+	}
+	return chat.Incoming{
+		Room:   chat.RoomID(evt.RoomID),
+		Sender: chat.UserID(evt.Sender),
+		Kind:   chat.Reaction,
+		To:     chat.MessageID(content.RelatesTo.EventID),
+		Key:    content.RelatesTo.Key,
+	}, true
+}
+
 func (d *Driver) isOwnUser(user id.UserID) bool {
 	local, server, err := user.ParseAndValidateRelaxed()
 	if err != nil || server != d.cfg.ServerName {
 		return false
 	}
 	return local == d.cfg.City || strings.HasPrefix(local, d.cfg.City+"-")
+}
+
+// render turns a message into Matrix content: its Markdown as HTML, then its
+// fold, if any, as a details block.
+func render(msg chat.Message) event.MessageEventContent {
+	content := format.RenderMarkdown(msg.Body, true, false)
+	f := msg.Fold
+	if f == nil {
+		return content
+	}
+	if content.FormattedBody == "" {
+		content.Format = event.FormatHTML
+		content.FormattedBody = "<p>" + html.EscapeString(msg.Body) + "</p>"
+	}
+	content.Body += "\n" + f.Text
+	text := html.EscapeString(f.Text)
+	if f.Code {
+		text = "<pre><code>" + text + "</code></pre>"
+	} else {
+		text = "<blockquote>" + text + "</blockquote>"
+	}
+	content.FormattedBody += "<details><summary>" + html.EscapeString(f.Summary) + "</summary>" + text + "</details>"
+	return content
 }

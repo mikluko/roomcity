@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,7 +155,11 @@ func TestSendAndReactAndType(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.Send(t.Context(), room, "host", chat.Message{Kind: chat.Text, Body: "one, edited", Replaces: first})
 	require.NoError(t, err)
-	require.NoError(t, d.React(t.Context(), room, "host", first, "👍"))
+	_, err = d.Send(t.Context(), room, "host", chat.Message{Kind: chat.Notice, Fold: &chat.Fold{Summary: "output", Text: "a < b", Code: true}})
+	require.NoError(t, err)
+	thumbs, err := d.React(t.Context(), room, "host", first, "👍")
+	require.NoError(t, err)
+	require.NoError(t, d.Unreact(t.Context(), room, "host", thumbs))
 	require.NoError(t, d.Typing(t.Context(), room, "host", true))
 	require.NoError(t, d.Typing(t.Context(), room, "host", false))
 
@@ -238,10 +243,43 @@ func TestAHoldersMessageIsAnOwnersPromptAndTheAnswerComesBack(t *testing.T) {
 	}, 15*time.Second, 200*time.Millisecond, "the answer appears in the room")
 	bodies := agentMessages(t, aliceIntent, room, key)
 	require.Contains(t, bodies, "I'll start with the todo list.")
+	require.Contains(t, bodies, "🔧 **ToolSearch**", "a tool call shows as a notice")
 	for _, body := range bodies {
 		require.NotEmpty(t, body)
-		require.NotContains(t, body, "\n\n", "a paragraph holds no blank line")
 	}
+
+	// A permission request that nobody has answered is answered by a reaction
+	// of the owner, which reaches the session as the answer. (The recording's
+	// own request was answered inside it.)
+	sessions.Emit(sname, session.Frame{Direction: session.FromAgent, Message: []byte(
+		`{"jsonrpc":"2.0","id":999,"method":"session/request_permission","params":{"toolCall":{"title":"Please approve"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}`)})
+	var ask id.EventID
+	require.Eventually(t, func() bool {
+		ask = findMessage(t, aliceIntent, room, key, "Please approve")
+		return ask != ""
+	}, 15*time.Second, 200*time.Millisecond)
+	_, err = aliceIntent.SendReaction(t.Context(), room, ask, "✅")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(sessions.Answers()) == 1 }, 15*time.Second, 100*time.Millisecond,
+		"the owner's reaction is the answer")
+	require.Equal(t, sname, sessions.Answers()[0].Session)
+}
+
+// findMessage returns the id of the agent's message whose body holds text.
+func findMessage(t *testing.T, reader *appservice.IntentAPI, room id.RoomID, agent, text string) id.EventID {
+	t.Helper()
+	msgs, err := reader.Messages(t.Context(), room, "", "", mautrix.DirectionBackward, nil, 100)
+	require.NoError(t, err)
+	for _, evt := range msgs.Chunk {
+		if evt.Type != event.EventMessage || evt.Sender != id.NewUserID("testcity-"+agent, serverName) {
+			continue
+		}
+		require.NoError(t, evt.Content.ParseRaw(evt.Type))
+		if strings.Contains(evt.Content.AsMessage().Body, text) {
+			return evt.ID
+		}
+	}
+	return ""
 }
 
 func cityBotIntent(t *testing.T, hs string) *appservice.IntentAPI {

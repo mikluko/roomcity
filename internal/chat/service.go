@@ -23,12 +23,15 @@ type Service struct {
 	// RetryEvery is the pause before a room that could not be made is tried
 	// again; zero means five seconds.
 	RetryEvery time.Duration
+	// PlanEvery is the shortest gap between two edits of the plan notice;
+	// zero means 1.2 seconds.
+	PlanEvery time.Duration
 
 	mu     sync.Mutex
-	making map[string]*sync.Mutex   // by agent: one room of an agent is made at a time
 	rooms  map[string]RoomID        // by agent
 	by     map[RoomID]*agentSession // by room
 	subs   map[string]struct{}      // sessions subscribed to
+	making map[string]*sync.Mutex   // by agent: one room of an agent is made at a time
 }
 
 // agentSession is the always-on agent whose room it is and the session the
@@ -36,11 +39,25 @@ type Service struct {
 type agentSession struct {
 	agent   string
 	session string
+	room    RoomID
+	// inputs carries what the room's people did that the renderer answers: a
+	// reaction on a permission request.
+	inputs chan Incoming
+
+	mu       sync.Mutex
+	messages map[uint64]chan MessageID // by the Seq of the prompt they became
 }
 
 // startedAfresh is the notice that goes to a room when the agent's session
 // begins anew.
 const startedAfresh = "The session began anew; nothing of the earlier one is remembered."
+
+// notTaken is the notice for an owner's message that reached no session.
+const notTaken = "The message was not taken: the session is not running."
+
+// promptWait is how long a Waiting prompt waits to learn which message it came
+// from.
+const promptWait = 2 * time.Second
 
 // Run makes the room of each always-on agent as its session appears, then
 // carries messages between the rooms and the sessions until ctx ends. A room
@@ -95,7 +112,17 @@ func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.I
 		return
 	}
 	s.mu.Lock()
-	s.by[room] = &agentSession{agent: info.Agent, session: info.Name}
+	target := s.by[room]
+	if target == nil {
+		target = &agentSession{
+			agent:    info.Agent,
+			room:     room,
+			inputs:   make(chan Incoming, 64),
+			messages: map[uint64]chan MessageID{},
+		}
+		s.by[room] = target
+	}
+	target.session = info.Name
 	_, subscribed := s.subs[info.Name]
 	if info.State != session.Ended {
 		s.subs[info.Name] = struct{}{}
@@ -112,7 +139,7 @@ func (s *Service) attach(ctx context.Context, wg *sync.WaitGroup, info session.I
 		s.mu.Unlock()
 		return
 	}
-	wg.Go(func() { s.render(ctx, info.Agent, room, events) })
+	wg.Go(func() { s.render(ctx, target, info.Name, events) })
 }
 
 // room returns the agent's room, making it if it has none, and tries again
@@ -163,48 +190,176 @@ func (s *Service) agentLock(agent string) *sync.Mutex {
 	return s.making[agent]
 }
 
-func (s *Service) render(ctx context.Context, agent string, room RoomID, events <-chan session.Event) {
-	var a answer
-	for ev := range events {
-		for _, text := range a.feed(ev) {
-			s.send(ctx, agent, room, Message{Kind: Text, Body: text})
-		}
-		if l, ok := ev.(session.Lifecycle); ok && l.Kind == session.StartedAfresh {
-			s.send(ctx, agent, room, Message{Kind: Notice, Body: startedAfresh})
+// render follows one session's events and the room's inputs until the events
+// end.
+func (s *Service) render(ctx context.Context, t *agentSession, name string, events <-chan session.Event) {
+	r := newRenderer(&roomOutbox{s: s, ctx: ctx, t: t, session: name}, time.Now, s.PlanEvery)
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			r.event(ev)
+		case in := <-t.inputs:
+			if in.Kind == Reaction {
+				r.answerPermission(in.To, in.Key, in.Sender)
+			} else {
+				r.stopped()
+			}
+		case <-tick.C:
+			r.tick()
 		}
 	}
 }
 
-func (s *Service) send(ctx context.Context, agent string, room RoomID, msg Message) {
-	if _, err := s.Driver.Send(ctx, room, agent, msg); err != nil {
-		s.Log.Error("sending to a room", "agent", agent, "err", err)
+// roomOutbox is what a renderer does to an agent's room.
+type roomOutbox struct {
+	s       *Service
+	ctx     context.Context
+	t       *agentSession
+	session string
+}
+
+func (o *roomOutbox) send(m Message) MessageID {
+	id, err := o.s.Driver.Send(o.ctx, o.t.room, o.t.agent, m)
+	if err != nil {
+		o.s.Log.Error("sending to a room", "agent", o.t.agent, "err", err)
+	}
+	return id
+}
+
+func (o *roomOutbox) react(to MessageID, key string) ReactionID {
+	id, err := o.s.Driver.React(o.ctx, o.t.room, o.t.agent, to, key)
+	if err != nil {
+		o.s.Log.Error("reacting in a room", "agent", o.t.agent, "err", err)
+	}
+	return id
+}
+
+func (o *roomOutbox) unreact(r ReactionID) {
+	if err := o.s.Driver.Unreact(o.ctx, o.t.room, o.t.agent, r); err != nil {
+		o.s.Log.Error("taking a reaction back", "agent", o.t.agent, "err", err)
 	}
 }
 
-// receive turns a message in an agent's room into a prompt when an owner
-// wrote it.
+func (o *roomOutbox) typing(on bool) {
+	if err := o.s.Driver.Typing(o.ctx, o.t.room, o.t.agent, on); err != nil {
+		o.s.Log.Debug("typing notice", "agent", o.t.agent, "err", err)
+	}
+}
+
+func (o *roomOutbox) promptMessage(seq uint64) MessageID {
+	select {
+	case id := <-o.t.slot(seq):
+		return id
+	case <-time.After(promptWait):
+		return ""
+	case <-o.ctx.Done():
+		return ""
+	}
+}
+
+func (o *roomOutbox) forgetPrompt(seq uint64) {
+	o.t.mu.Lock()
+	defer o.t.mu.Unlock()
+	delete(o.t.messages, seq)
+}
+
+func (o *roomOutbox) answerPermission(requestID, optionID string) {
+	if err := o.s.Sessions.AnswerPermission(o.ctx, o.session, requestID, optionID); err != nil {
+		o.s.Log.Error("answering a permission request", "agent", o.t.agent, "err", err)
+	}
+}
+
+// slot returns the channel on which the message that became the prompt of that
+// Seq is made known. The channel holds one value and is read once.
+func (t *agentSession) slot(seq uint64) chan MessageID {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ch, ok := t.messages[seq]
+	if !ok {
+		ch = make(chan MessageID, 1)
+		t.messages[seq] = ch
+	}
+	return ch
+}
+
+// receive handles what someone did in a room: a message that may be an
+// owner's prompt or command, a reaction that may answer a permission request.
 func (s *Service) receive(ctx context.Context, in Incoming) {
 	s.mu.Lock()
 	target, ok := s.by[in.Room]
+	var current string
+	if ok {
+		current = target.session
+	}
 	s.mu.Unlock()
 	if !ok {
 		return
 	}
 	switch {
 	case !slices.Contains(s.Owners, in.Sender):
-		s.Log.Warn("ignoring a message of someone without the owner's role", "agent", target.agent, "sender", in.Sender)
+		s.Log.Warn("ignoring someone without the owner's role", "agent", target.agent, "sender", in.Sender)
+	case in.Kind == Reaction:
+		select {
+		case target.inputs <- in:
+		default:
+			s.Log.Warn("dropping a reaction: the room is behind", "agent", target.agent)
+		}
 	case in.Edit:
 		s.Log.Debug("ignoring an edit: what the agent received stays received", "agent", target.agent)
 	case in.Kind != Text:
 		s.Log.Debug("ignoring a notice", "agent", target.agent)
 	case strings.HasPrefix(in.Body, "!"):
-		s.Log.Info("a command of the runtime, not handled here", "agent", target.agent, "sender", in.Sender)
+		s.command(ctx, target, current, in)
 	default:
-		_, err := s.Sessions.Prompt(ctx, target.session, session.PromptInput{Text: in.Body})
-		if errors.Is(err, session.ErrNotFound) || errors.Is(err, session.ErrNotRunning) {
-			s.Log.Warn("dropping a prompt: the session is not there", "agent", target.agent, "err", err)
-		} else if err != nil {
-			s.Log.Error("giving the prompt to the agent", "agent", target.agent, "err", err)
+		s.prompt(ctx, target, current, in)
+	}
+}
+
+func (s *Service) prompt(ctx context.Context, t *agentSession, name string, in Incoming) {
+	seq, err := s.Sessions.Prompt(ctx, name, session.PromptInput{Text: in.Body})
+	switch {
+	case err == nil:
+		t.slot(seq) <- in.Message
+	case errors.Is(err, session.ErrNotFound), errors.Is(err, session.ErrNotRunning):
+		s.Log.Warn("dropping a prompt: the session is not there", "agent", t.agent, "err", err)
+		s.notice(ctx, t, notTaken, in.Message)
+	default:
+		s.Log.Error("giving the prompt to the agent", "agent", t.agent, "err", err)
+	}
+}
+
+func (s *Service) notice(ctx context.Context, t *agentSession, body string, replyTo MessageID) {
+	if _, err := s.Driver.Send(ctx, t.room, t.agent, Message{Kind: Notice, Body: body, ReplyTo: replyTo}); err != nil {
+		s.Log.Error("sending a notice", "agent", t.agent, "err", err)
+	}
+}
+
+// commands are the messages that begin with "!" and that the runtime answers
+// itself; the agent never sees one.
+const helpText = "Commands: `!stop` ends the running turn and drops what waits; `!help` lists them."
+
+func (s *Service) command(ctx context.Context, t *agentSession, name string, in Incoming) {
+	word := strings.Fields(in.Body)[0]
+	switch word {
+	case "!stop":
+		if err := s.Sessions.Cancel(ctx, name); err != nil {
+			s.Log.Error("cancelling a turn", "agent", t.agent, "err", err)
+			s.notice(ctx, t, "Could not stop: "+err.Error(), in.Message)
+			return
 		}
+		select {
+		case t.inputs <- Incoming{Kind: Text, Body: word}:
+		default:
+		}
+		s.notice(ctx, t, "Asked the agent to stop.", in.Message)
+	case "!help":
+		s.notice(ctx, t, helpText, in.Message)
+	default:
+		s.notice(ctx, t, fmt.Sprintf("Unknown command `%s`. %s", word, helpText), in.Message)
 	}
 }

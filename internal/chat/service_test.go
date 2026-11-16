@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -23,12 +24,21 @@ type sent struct {
 	Msg     chat.Message
 }
 
+type reaction struct {
+	To  chat.MessageID
+	Key string
+}
+
 // fakeDriver keeps what the service does to the chat system in memory.
 type fakeDriver struct {
 	mu      sync.Mutex
 	specs   []chat.RoomSpec
 	sent    []sent
 	handler chan func(chat.Incoming)
+
+	reactions []reaction
+	typings   []bool
+	undone    []chat.ReactionID
 	// failures is how many calls of EnsureRoom fail before one succeeds.
 	failures int
 }
@@ -54,11 +64,35 @@ func (d *fakeDriver) Send(_ context.Context, room chat.RoomID, speaker string, m
 	return chat.MessageID("$" + msg.Body), nil
 }
 
-func (d *fakeDriver) React(context.Context, chat.RoomID, string, chat.MessageID, string) error {
+func (d *fakeDriver) React(_ context.Context, _ chat.RoomID, _ string, to chat.MessageID, key string) (chat.ReactionID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.reactions = append(d.reactions, reaction{to, key})
+	return chat.ReactionID(fmt.Sprintf("r%d", len(d.reactions))), nil
+}
+
+func (d *fakeDriver) Unreact(_ context.Context, _ chat.RoomID, _ string, r chat.ReactionID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.undone = append(d.undone, r)
 	return nil
 }
 
-func (d *fakeDriver) Typing(context.Context, chat.RoomID, string, bool) error { return nil }
+func (d *fakeDriver) Typing(_ context.Context, _ chat.RoomID, _ string, on bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.typings = append(d.typings, on)
+	return nil
+}
+
+func (d *fakeDriver) lastTyping() (on, any bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.typings) == 0 {
+		return false, false
+	}
+	return d.typings[len(d.typings)-1], true
+}
 
 func (d *fakeDriver) Receive(ctx context.Context, handle func(chat.Incoming)) error {
 	d.handler <- handle
@@ -220,8 +254,9 @@ func TestServiceSendsARecordedAnswerParagraphByParagraph(t *testing.T) {
 		for _, m := range driver.messages() {
 			require.Equal(t, chat.RoomID("!host"), m.Room)
 			require.Equal(t, "host", m.Speaker)
-			require.Equal(t, chat.Text, m.Msg.Kind)
-			got = append(got, m.Msg.Body)
+			if m.Msg.Kind == chat.Text && !strings.HasPrefix(m.Msg.Body, "🔐") {
+				got = append(got, m.Msg.Body)
+			}
 		}
 		return strings.Join(got, "") == want
 	}, 5*time.Second, 10*time.Millisecond)

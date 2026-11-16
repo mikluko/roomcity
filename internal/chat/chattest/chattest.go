@@ -15,7 +15,7 @@ import (
 
 // Sessions is a session.Service with the sessions a test adds and the events
 // it emits. Only what the chat side calls is implemented: List, Watch,
-// Subscribe and Prompt; Cancel and AnswerPermission do nothing.
+// Subscribe, Prompt, Cancel and AnswerPermission, which only record.
 type Sessions struct {
 	mu         sync.Mutex
 	infos      []session.Info
@@ -23,6 +23,16 @@ type Sessions struct {
 	closeWatch func()
 	events     map[string]chan session.Event
 	prompts    map[string][]string
+	cancels    map[string]int
+	answers    []PermissionAnswer
+
+	// PromptErr, when set, is what Prompt returns, and the prompt is not kept.
+	PromptErr error
+}
+
+// PermissionAnswer is a call of AnswerPermission.
+type PermissionAnswer struct {
+	Session, RequestID, OptionID string
 }
 
 var _ session.Service = (*Sessions)(nil)
@@ -103,6 +113,9 @@ func (s *Sessions) Subscribe(ctx context.Context, name string, _ uint64) (<-chan
 func (s *Sessions) Prompt(_ context.Context, name string, in session.PromptInput) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.PromptErr != nil {
+		return 0, s.PromptErr
+	}
 	if s.prompts == nil {
 		s.prompts = map[string][]string{}
 	}
@@ -111,10 +124,37 @@ func (s *Sessions) Prompt(_ context.Context, name string, in session.PromptInput
 }
 
 // Cancel implements session.Service.
-func (*Sessions) Cancel(context.Context, string) error { return nil }
+func (s *Sessions) Cancel(_ context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancels == nil {
+		s.cancels = map[string]int{}
+	}
+	s.cancels[name]++
+	return nil
+}
+
+// Cancels returns how many times the session was cancelled.
+func (s *Sessions) Cancels(name string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancels[name]
+}
 
 // AnswerPermission implements session.Service.
-func (*Sessions) AnswerPermission(context.Context, string, string, string) error { return nil }
+func (s *Sessions) AnswerPermission(_ context.Context, name, requestID, optionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.answers = append(s.answers, PermissionAnswer{name, requestID, optionID})
+	return nil
+}
+
+// Answers returns the permission answers given so far.
+func (s *Sessions) Answers() []PermissionAnswer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]PermissionAnswer(nil), s.answers...)
+}
 
 // Emit makes the session produce events.
 func (s *Sessions) Emit(name string, events ...session.Event) {

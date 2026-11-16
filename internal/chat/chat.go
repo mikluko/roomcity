@@ -24,13 +24,29 @@ const (
 	Text Kind = iota
 	// Notice is a message that does not notify: a log line, a status.
 	Notice
+	// Reaction is not a message but a reaction someone put on one. It is
+	// only the Kind of an Incoming.
+	Reaction
 )
+
+// Fold is text that a reader opens when they want it.
+type Fold struct {
+	Summary string
+	Text    string
+	// Code says the text is preformatted, as command output is.
+	Code bool
+}
+
+// ReactionID names a reaction put on a message.
+type ReactionID string
 
 // Message is what a speaker sends to a room.
 type Message struct {
 	Kind Kind
 	// Body is Markdown.
 	Body string
+	// Fold, when set, follows the body as a block the reader opens.
+	Fold *Fold
 	// ReplyTo, when set, makes the message a reply to that message.
 	ReplyTo MessageID
 	// Replaces, when set, makes the message an edit of that message, which
@@ -61,6 +77,9 @@ type Incoming struct {
 	Body string
 	// Edit is true when the message replaces an earlier one.
 	Edit bool
+	// To and Key, for a Reaction, are the message it is on and its key.
+	To  MessageID
+	Key string
 }
 
 // Driver is the chat system as the city's server needs it. Its methods are
@@ -73,10 +92,13 @@ type Driver interface {
 	// Send sends a message to a room as the speaker.
 	Send(ctx context.Context, room RoomID, speaker string, msg Message) (MessageID, error)
 	// React puts a reaction on a message as the speaker.
-	React(ctx context.Context, room RoomID, speaker string, to MessageID, key string) error
+	React(ctx context.Context, room RoomID, speaker string, to MessageID, key string) (ReactionID, error)
+	// Unreact takes a reaction of the speaker back.
+	Unreact(ctx context.Context, room RoomID, speaker string, reaction ReactionID) error
 	// Typing turns the speaker's typing notice in a room on or off.
 	Typing(ctx context.Context, room RoomID, speaker string, on bool) error
-	// Receive calls handle for each message that someone other than the
-	// city's own speakers sends to a room of the city, until ctx ends.
+	// Receive calls handle for each message, and each reaction, that someone
+	// other than the city's own speakers sends to a room of the city, until
+	// ctx ends.
 	Receive(ctx context.Context, handle func(Incoming)) error
 }
