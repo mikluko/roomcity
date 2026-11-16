@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The server tells a foreman that the task it waits for is closed: `wait(task)` keeps the task in the session's marks, and every ten seconds the server reads the tasks waited for and, for one that is closed, queues a prompt marked as gc's for the session, which an idle session takes as a turn (gc's own `session wait` delivers its reminder at a boundary of the session's own, which an idle one has none of, so it is no longer used). The wait survives a new start of the session. `HostService.Done` takes optional `blocked`, `commit` and `branch` fields, which the host's `done` tool does not offer yet, and records the task as gc's `no-op` (an answer, no commit), `shipped` (with a commit and its branch) or `blocked`.
+
 ## [0.11.0] - 2026-11-16
 
 ### Added

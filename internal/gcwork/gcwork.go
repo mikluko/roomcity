@@ -7,13 +7,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"sarak.sh/mikluko/roomcity/internal/gchandler"
+	"sarak.sh/mikluko/roomcity/internal/server"
+	"sarak.sh/mikluko/roomcity/internal/session"
 )
+
+// WaitsMark is the session's mark that holds, by commas, the tasks it asked to
+// be told of when they are closed.
+const WaitsMark = session.WaitsMark
 
 // ClaimedMark is the session's mark that holds the task it claimed, for done.
 const ClaimedMark = "roomcity.claimed_task"
@@ -55,6 +64,14 @@ type Work struct {
 	Gc    Gc
 	Marks Marks
 	Pool  string
+	// Sessions and Nudge are what the telling of a closed task needs: the
+	// running sessions, and a prompt marked as gc's for one of them.
+	Sessions interface {
+		List(ctx context.Context) ([]session.Info, error)
+	}
+	Nudge func(ctx context.Context, session, text string) error
+	// Log gets what Poll cannot do; nil is slog.Default.
+	Log *slog.Logger
 
 	locks sync.Map // session name -> *sync.Mutex
 }
@@ -74,10 +91,28 @@ func (w *Work) pool() string {
 	return w.Pool
 }
 
+type gcExec func(ctx context.Context, session string, args []string, stdin []byte) (gchandler.Result, error)
+
+type quietGc interface {
+	ExecQuiet(ctx context.Context, session string, args []string, stdin []byte) (gchandler.Result, error)
+}
+
 // gc runs one command and returns what it printed, or the reason it failed in
 // gc's own words, for the agent to read.
 func (w *Work) gc(ctx context.Context, session string, stdin []byte, args ...string) ([]byte, error) {
-	res, err := w.Gc.Exec(ctx, session, args, stdin)
+	return w.exec(ctx, w.Gc.Exec, session, stdin, args...)
+}
+
+func (w *Work) gcQuiet(ctx context.Context, session string, stdin []byte, args ...string) ([]byte, error) {
+	run := w.Gc.Exec
+	if gc, ok := w.Gc.(quietGc); ok {
+		run = gc.ExecQuiet
+	}
+	return w.exec(ctx, run, session, stdin, args...)
+}
+
+func (w *Work) exec(ctx context.Context, run gcExec, session string, stdin []byte, args ...string) ([]byte, error) {
+	res, err := run(ctx, session, args, stdin)
 	if err != nil {
 		return nil, err
 	}
@@ -119,23 +154,139 @@ func (w *Work) Dispatch(ctx context.Context, session, task string) (string, erro
 	return rec.BeadID, nil
 }
 
-// Wait registers the session's wish to be told when the task is closed. The
-// telling is gc's, a nudge to the session, which is named by its identity.
+// Wait registers the session's wish to be told when the task is closed. An id
+// gc cannot read is refused and nothing is stored. The wait survives a new
+// start of the session. The telling is the server's own, a prompt marked as
+// gc's that Poll queues for the session when the task is closed: gc's own wait
+// is a reminder that comes at the session's next boundary, and an idle session
+// has none.
 func (w *Work) Wait(ctx context.Context, session, task string) error {
 	if err := checkID(task); err != nil {
 		return err
 	}
-	_, err := w.gc(ctx, session, nil, "session", "wait", "--on-beads", task, "--note", fmt.Sprintf("Task %s is closed: its result is what the tool result gives for it.", task))
-	return err
+	defer w.lock(session)()
+	waits, err := w.waits(ctx, session)
+	if err != nil {
+		return err
+	}
+	if slices.Contains(waits, task) {
+		return nil
+	}
+	if _, _, _, _, err := w.result(ctx, session, task); err != nil {
+		return err
+	}
+	return w.Marks.SetMark(ctx, session, WaitsMark, strings.Join(append(waits, task), ","))
+}
+
+func (w *Work) waits(ctx context.Context, session string) ([]string, error) {
+	v, err := w.Marks.Mark(ctx, session, WaitsMark)
+	if err != nil || v == "" {
+		return nil, err
+	}
+	return strings.Split(v, ","), nil
+}
+
+// Run polls for the closed tasks that sessions wait for every interval, ten
+// seconds when zero, until ctx ends.
+func (w *Work) Run(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		every = 10 * time.Second
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			w.Poll(ctx)
+		}
+	}
+}
+
+// Poll tells each running session of the tasks it waits for that are closed
+// now, once, and stops its waiting for them. A task that cannot be read is
+// tried again.
+func (w *Work) Poll(ctx context.Context) {
+	log := w.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	all, err := w.Sessions.List(ctx)
+	if err != nil {
+		log.Error("listing the sessions for the tasks they wait for", "err", err)
+		return
+	}
+	for _, info := range all {
+		if info.State != session.Running {
+			continue
+		}
+		w.pollSession(ctx, log, info.Name)
+	}
+}
+
+func (w *Work) pollSession(ctx context.Context, log *slog.Logger, name string) {
+	defer w.lock(name)()
+	waits, err := w.waits(ctx, name)
+	if err != nil || len(waits) == 0 {
+		return
+	}
+	var still []string
+	for _, id := range waits {
+		closed, _, result, outcome, err := w.pollResult(ctx, name, id)
+		if err != nil {
+			log.Warn("reading a task a session waits for", "session", name, "task", id, "err", err)
+			still = append(still, id)
+			continue
+		}
+		if !closed {
+			still = append(still, id)
+			continue
+		}
+		if err := w.Nudge(ctx, name, closedText(id, outcome, result)); err != nil {
+			log.Error("telling a session that its task is closed", "session", name, "task", id, "err", err)
+			still = append(still, id)
+		}
+	}
+	if len(still) != len(waits) {
+		if err := w.Marks.SetMark(ctx, name, WaitsMark, strings.Join(still, ",")); err != nil {
+			log.Error("forgetting the tasks a session was told of", "session", name, "err", err)
+		}
+	}
+}
+
+// closedText is the telling: the task, how it ended, and where the answer is.
+func closedText(id, outcome, result string) string {
+	if outcome == OutcomeAbandoned {
+		return fmt.Sprintf("Task %s is closed, and it failed: %s Read it with the tool result.", id, clip(firstLine(result), maxReason))
+	}
+	return fmt.Sprintf("Task %s is closed. Read what came of it with the tool result.", id)
 }
 
 // Result returns the state of the task and, when it is closed, what Done
 // stored in it and how it ended.
 func (w *Work) Result(ctx context.Context, session, task string) (closed bool, status, result, outcome string, err error) {
+	return w.result(ctx, session, task)
+}
+
+func (w *Work) result(ctx context.Context, session, task string) (closed bool, status, result, outcome string, err error) {
+	return w.readResult(ctx, session, task, false)
+}
+
+func (w *Work) pollResult(ctx context.Context, session, task string) (closed bool, status, result, outcome string, err error) {
+	return w.readResult(ctx, session, task, true)
+}
+
+func (w *Work) readResult(ctx context.Context, session, task string, quiet bool) (closed bool, status, result, outcome string, err error) {
 	if err := checkID(task); err != nil {
 		return false, "", "", "", err
 	}
-	out, err := w.gc(ctx, session, nil, "bd", "show", task, "--json")
+	var out []byte
+	if quiet {
+		out, err = w.gcQuiet(ctx, session, nil, "bd", "show", task, "--json")
+	} else {
+		out, err = w.gc(ctx, session, nil, "bd", "show", task, "--json")
+	}
 	if err != nil {
 		return false, "", "", "", err
 	}
@@ -209,7 +360,7 @@ func (w *Work) claim(ctx context.Context, session string) (id, text string, foun
 
 // Done records result in the claimed task, closes it, and has gc end the
 // session.
-func (w *Work) Done(ctx context.Context, session, result string) error {
+func (w *Work) Done(ctx context.Context, session, result string, o server.DoneOptions) error {
 	defer w.lock(session)()
 	if over, err := w.over(ctx, session); err != nil || over != "" {
 		if err != nil {
@@ -224,7 +375,21 @@ func (w *Work) Done(ctx context.Context, session, result string) error {
 	if id == "" {
 		return errors.New("you have claimed no task: claim first")
 	}
-	return w.finish(ctx, session, id, result, OutcomeDone, "Done: "+clip(firstLine(result), maxReason))
+	outcome, meta := OutcomeNoOp, map[string]string(nil)
+	switch {
+	case o.Blocked:
+		outcome = OutcomeBlocked
+	case o.Commit != "" && o.Branch != "":
+		outcome = OutcomeShipped
+		meta = map[string]string{"gc.work_commit": o.Commit, "gc.work_branch": o.Branch}
+	case o.Commit != "" || o.Branch != "":
+		return errors.New("a commit and its branch are given together or not at all")
+	}
+	prefix := "Done: "
+	if o.Blocked {
+		prefix = "Blocked: "
+	}
+	return w.finish(ctx, session, id, result, outcome, prefix+clip(firstLine(result), maxReason), meta)
 }
 
 // Fail ends a session that cannot finish its task: the task, claimed on the
@@ -246,14 +411,18 @@ func (w *Work) Fail(ctx context.Context, session, reason string) error {
 			return err
 		}
 	}
-	return w.finish(ctx, session, id, reason, OutcomeAbandoned, clip(firstLine(reason), maxReason))
+	return w.finish(ctx, session, id, reason, OutcomeAbandoned, clip(firstLine(reason), maxReason), nil)
 }
 
-// The typed work-record outcomes (gc.work_outcome) that the tools set. gc has
-// no outcome for work that was answered and shipped no commit: no-op, which
-// asks for no commit, is the one a worker's done takes.
+// The typed work-record outcomes (gc.work_outcome) that the tools set: a task
+// a worker carried out with a commit and its branch is shipped; one it carried
+// out with an answer and no commit is no-op, gc's "needed no change", which
+// gc's gate takes without a commit; one it could not do is blocked; one the
+// server ended because its session could not finish is abandoned.
 const (
-	OutcomeDone      = "no-op"
+	OutcomeNoOp      = "no-op"
+	OutcomeShipped   = "shipped"
+	OutcomeBlocked   = "blocked"
 	OutcomeAbandoned = "abandoned"
 )
 
@@ -271,9 +440,18 @@ func (w *Work) over(ctx context.Context, session string) (string, error) {
 
 // finish records what came of the task, closes it, forgets it and has gc end
 // the session.
-func (w *Work) finish(ctx context.Context, session, id, notes, outcome, reason string) error {
+func (w *Work) finish(ctx context.Context, session, id, notes, outcome, reason string, extra map[string]string) error {
 	notes, reason = strings.ToValidUTF8(notes, "\uFFFD"), strings.ToValidUTF8(reason, "\uFFFD")
-	if _, err := w.gc(ctx, session, nil, "bd", "update", id, "--notes="+notes, "--set-metadata", "gc.work_outcome="+outcome); err != nil {
+	metadata := map[string]string{"gc.work_outcome": outcome}
+	for key, value := range extra {
+		metadata[key] = value
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("encoding the task's outcome: %w", err)
+	}
+	args := []string{"bd", "update", id, "--notes=" + notes, "--metadata", string(encoded)}
+	if _, err := w.gc(ctx, session, nil, args...); err != nil {
 		return err
 	}
 	if _, err := w.gc(ctx, session, nil, "bd", "close", id, "--reason="+reason); err != nil {
@@ -285,7 +463,7 @@ func (w *Work) finish(ctx context.Context, session, id, notes, outcome, reason s
 	if err := w.Marks.SetMark(ctx, session, ClaimedMark, ""); err != nil {
 		return err
 	}
-	_, err := w.gc(ctx, session, nil, "runtime", "drain-ack")
+	_, err = w.gc(ctx, session, nil, "runtime", "drain-ack")
 	return err
 }
 

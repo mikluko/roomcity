@@ -25,7 +25,14 @@ type Work interface {
 	// there is none.
 	Claim(ctx context.Context, session string) (id, text string, found bool, err error)
 	// Done closes the session's claimed task with result and ends the session.
-	Done(ctx context.Context, session, result string) error
+	Done(ctx context.Context, session, result string, o DoneOptions) error
+}
+
+// DoneOptions say how a task ended beyond its result: Blocked for one the
+// worker could not do, Commit and Branch for the commit that satisfies it.
+type DoneOptions struct {
+	Blocked        bool
+	Commit, Branch string
 }
 
 // has is the check of the tool for the session's agent, made after its token
@@ -121,7 +128,7 @@ func (h *Host) Done(ctx context.Context, req *connect.Request[roomcityv1.DoneReq
 	if err := h.has(ctx, m.Session, "done"); err != nil {
 		return nil, err
 	}
-	if err := h.Work.Done(ctx, m.Session, m.Result); err != nil {
+	if err := h.Work.Done(ctx, m.Session, m.Result, DoneOptions{Blocked: m.Blocked, Commit: m.Commit, Branch: m.Branch}); err != nil {
 		return nil, workError(err)
 	}
 	return connect.NewResponse(&roomcityv1.DoneResponse{}), nil

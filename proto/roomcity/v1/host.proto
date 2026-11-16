@@ -156,6 +156,12 @@ message DoneRequest {
   string session = 1;
   // What came of the task, for the one who dispatched it to read.
   string result = 2;
+  // The worker could not do the task: it ends as gc's blocked, not shipped.
+  bool blocked = 3;
+  // The commit that satisfies the task and the branch it is on, when the work
+  // made one; gc's record of a shipped task has them.
+  string commit = 4;
+  string branch = 5;
 }
 
 message DoneResponse {}

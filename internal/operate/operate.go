@@ -525,8 +525,8 @@ func (o *Operator) watchPod(ctx context.Context, name string, died chan<- string
 	}
 }
 
-// setMarks forgets the marks of the session's earlier life and sets the
-// identity ones gc reads back.
+// setMarks forgets the marks of the session's earlier start and sets the
+// identity ones gc reads back. The tasks the session waits for are kept.
 func (o *Operator) setMarks(ctx context.Context, name string, sc startConfig) error {
 	if err := o.reg.ClearMarks(ctx, name); err != nil {
 		return err
@@ -572,8 +572,8 @@ func (o *Operator) startProcess(ctx context.Context, name string, sc startConfig
 }
 
 // stop ends the session: its host is told to stop, the session ends, its
-// Job is deleted and its marks are forgotten. A session that does not exist
-// is stopped all the same.
+// Job is deleted and the marks of its start are forgotten. A session that
+// does not exist is stopped all the same.
 func (o *Operator) stop(ctx context.Context, name string) result {
 	if o.isProcess(name) {
 		if err := o.cfg.Processes.Stop(ctx, name); err != nil {

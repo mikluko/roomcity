@@ -70,7 +70,7 @@ Two limits, from the server's not being able to read or list Secrets:
 The session host gives each agent an MCP server named `room`, over http on the pod's loopback with a secret of its own for the session, when the agent says it takes http MCP servers (Claude Code through claudeacp and goose do). Its tools are the agent's way to the room and to the other sessions of the city; the agent calls them by the names its own program gives them: `mcp__room__attach` in Claude Code, `room: attach` in goose.
 
 - `attach(path, caption)`: every session has it. A file of the working directory goes to the room, an image shown in the conversation and any other file a file to download; the agent is told why when it is refused (outside the working directory, too large, a kind the room does not take). `[chat] max_file` and `file_kinds` bound what the room takes.
-- `dispatch(task)`, `wait(task)` and `result(task)` for a foreman: hand a task to the pool of workers and get its id, ask to be told when it is closed (the telling comes later as gc's own prompt), and read how it stands and what came of it (`not done yet (<status>)`, or what the worker left).
+- `dispatch(task)`, `wait(task)` and `result(task)` for a foreman: hand a task to the pool of workers and get its id, ask to be told when it is closed (the server queues a prompt marked as gc's within ten seconds of the close, and the wait survives a new start of the session), and read how it stands and what came of it (`not done yet (<status>)`, or what the worker left).
 - `claim()` and `done(result)` for a worker: take the task the session was started for (none: the session ends) and close it with what came of it, which ends the session.
 
 The tools beyond `attach` are the agent's by its table in `roomcity.toml`:

@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"sarak.sh/mikluko/roomcity/internal/gchandler"
+	"sarak.sh/mikluko/roomcity/internal/gcwork"
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 	"sarak.sh/mikluko/roomcity/internal/operate"
 	"sarak.sh/mikluko/roomcity/internal/procs"
@@ -389,7 +391,54 @@ func TestStartOfALiveSessionFails(t *testing.T) {
 	require.Len(t, f.jobs.created, 1)
 }
 
-func TestMarksOfASessionThatDiedWithoutAStopAreGoneAtItsNextStart(t *testing.T) {
+type waitTaskGc struct{ status string }
+
+func (g *waitTaskGc) Exec(context.Context, string, []string, []byte) (gchandler.Result, error) {
+	return gchandler.Result{Stdout: []byte(`[{"status":"` + g.status + `"}]`)}, nil
+}
+
+func TestAWaitSurvivesAStopAndStartAndTellsOnce(t *testing.T) {
+	f := newFixture(t, operate.Config{})
+	h := &host{got: make(chan session.Instruction, 8), frames: recording(t)}
+	f.jobs.onCreate = func(spec operate.JobSpec) { go h.run(f.ctx, f.reg, spec, true) }
+	cfg := f.startConfig(map[string]any{"nudge": ""})
+	require.Zero(t, f.do("start", cfg, "w-1").ExitCode)
+
+	gc := &waitTaskGc{status: "in_progress"}
+	var told []string
+	w := &gcwork.Work{Gc: gc, Marks: f.reg, Sessions: f.reg, Nudge: func(_ context.Context, _, text string) error {
+		told = append(told, text)
+		return nil
+	}}
+	require.NoError(t, w.Wait(f.ctx, "w-1", "bd-7"))
+	require.NoError(t, f.reg.SetMark(f.ctx, "w-1", gcwork.ClaimedMark, "bd-8"))
+	require.NoError(t, f.reg.SetMark(f.ctx, "w-1", gcwork.OverMark, gcwork.OutcomeNoOp))
+
+	require.Zero(t, f.do("stop", "", "w-1").ExitCode)
+	require.Zero(t, f.do("start", cfg, "w-1").ExitCode)
+	for _, key := range []string{gcwork.ClaimedMark, gcwork.OverMark} {
+		value, err := f.reg.Mark(f.ctx, "w-1", key)
+		require.NoError(t, err)
+		require.Empty(t, value, key)
+	}
+	waits, err := f.reg.Mark(f.ctx, "w-1", gcwork.WaitsMark)
+	require.NoError(t, err)
+	require.Equal(t, "bd-7", waits)
+
+	w.Poll(f.ctx)
+	require.Empty(t, told, "an open task is waited for still")
+	gc.status = "closed"
+	w.Poll(f.ctx)
+	require.Len(t, told, 1)
+	require.Contains(t, told[0], "Task bd-7 is closed")
+	waits, err = f.reg.Mark(f.ctx, "w-1", gcwork.WaitsMark)
+	require.NoError(t, err)
+	require.Empty(t, waits)
+	w.Poll(f.ctx)
+	require.Len(t, told, 1, "the close is told once")
+}
+
+func TestStartMarksOfASessionThatDiedWithoutAStopAreGoneAtItsNextStart(t *testing.T) {
 	f := newFixture(t, operate.Config{})
 	h := &host{got: make(chan session.Instruction, 8), frames: recording(t)}
 	f.jobs.onCreate = func(spec operate.JobSpec) { go h.run(f.ctx, f.reg, spec, true) }

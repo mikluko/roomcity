@@ -173,7 +173,16 @@ func Run(ctx context.Context, o Options) error {
 		RuntimeURL: "http://" + o.Listeners.Runtime.Addr().String(),
 		Log:        log,
 	})
-	work := &gcwork.Work{Gc: gc, Marks: reg}
+	work := &gcwork.Work{
+		Gc:       gc,
+		Marks:    reg,
+		Sessions: reg,
+		Nudge: func(ctx context.Context, name, text string) error {
+			_, err := reg.Nudge(ctx, name, text)
+			return err
+		},
+		Log: log,
+	}
 	watch := &taskwatch.Watch{
 		Sessions:    reg,
 		Ender:       work,
@@ -207,6 +216,10 @@ func Run(ctx context.Context, o Options) error {
 	}
 	g.Go(func() error {
 		watch.Run(ctx)
+		return nil
+	})
+	g.Go(func() error {
+		work.Run(ctx, 0)
 		return nil
 	})
 	g.Go(func() error {

@@ -590,6 +590,10 @@ func (r *Registry) SetMark(ctx context.Context, name, key, value string) error {
 	return err
 }
 
+// WaitsMark is the session's mark that holds the tasks it asked to be told of
+// when they are closed. Unlike the marks of a start, it survives ClearMarks.
+const WaitsMark = "roomcity.waits"
+
 // Mark returns the session's mark key, "" when it is not set, as it is for a
 // session the registry does not hold.
 func (r *Registry) Mark(ctx context.Context, name, key string) (string, error) {
@@ -670,9 +674,10 @@ func (r *Registry) RemoveMark(ctx context.Context, name, key string) error {
 	return err
 }
 
-// ClearMarks removes every mark of the session.
+// ClearMarks removes the marks of the session's start. WaitsMark belongs to
+// the session rather than one start and is kept.
 func (r *Registry) ClearMarks(ctx context.Context, name string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM marks WHERE session = ?`, name)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM marks WHERE session = ? AND key != ?`, name, WaitsMark)
 	return err
 }
 

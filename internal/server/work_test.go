@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -43,8 +44,8 @@ func (h *handing) Claim(_ context.Context, s string) (string, string, bool, erro
 	return "bd-7", "count the words", true, h.err
 }
 
-func (h *handing) Done(_ context.Context, s, result string) error {
-	h.calls = append(h.calls, "done "+s+" "+result)
+func (h *handing) Done(_ context.Context, s, result string, o server.DoneOptions) error {
+	h.calls = append(h.calls, fmt.Sprintf("done %s %s %v %s %s", s, result, o.Blocked, o.Commit, o.Branch))
 	return h.err
 }
 
@@ -100,10 +101,10 @@ func TestTheForemanDispatchesAndWaitsAndAWorkerClaimsAndIsDone(t *testing.T) {
 	require.True(t, c.Msg.Found)
 	require.Equal(t, "bd-7", c.Msg.TaskId)
 	require.Equal(t, "count the words", c.Msg.Text)
-	_, err = f.worker.Done(ctx, connect.NewRequest(&roomcityv1.DoneRequest{Session: "worker-1", Result: "nine"}))
+	_, err = f.worker.Done(ctx, connect.NewRequest(&roomcityv1.DoneRequest{Session: "worker-1", Result: "nine", Commit: "abc", Branch: "main"}))
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"dispatch foreman-1 count", "wait foreman-1 bd-7", "result foreman-1 bd-7", "claim worker-1", "done worker-1 nine"}, f.work.calls)
+	require.Equal(t, []string{"dispatch foreman-1 count", "wait foreman-1 bd-7", "result foreman-1 bd-7", "claim worker-1", "done worker-1 nine false abc main"}, f.work.calls)
 }
 
 func TestAToolIsForTheSessionsOfTheAgentThatHasItAndNoOther(t *testing.T) {

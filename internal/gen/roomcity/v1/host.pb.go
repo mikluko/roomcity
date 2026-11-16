@@ -1042,7 +1042,13 @@ type DoneRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Session string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	// What came of the task, for the one who dispatched it to read.
-	Result        string `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	Result string `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	// The worker could not do the task: it ends as gc's blocked, not shipped.
+	Blocked bool `protobuf:"varint,3,opt,name=blocked,proto3" json:"blocked,omitempty"`
+	// The commit that satisfies the task and the branch it is on, when the work
+	// made one; gc's record of a shipped task has them.
+	Commit        string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
+	Branch        string `protobuf:"bytes,5,opt,name=branch,proto3" json:"branch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1087,6 +1093,27 @@ func (x *DoneRequest) GetSession() string {
 func (x *DoneRequest) GetResult() string {
 	if x != nil {
 		return x.Result
+	}
+	return ""
+}
+
+func (x *DoneRequest) GetBlocked() bool {
+	if x != nil {
+		return x.Blocked
+	}
+	return false
+}
+
+func (x *DoneRequest) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *DoneRequest) GetBranch() string {
+	if x != nil {
+		return x.Branch
 	}
 	return ""
 }
@@ -1727,10 +1754,13 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\rClaimResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"?\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\x89\x01\n" +
 	"\vDoneRequest\x12\x18\n" +
 	"\asession\x18\x01 \x01(\tR\asession\x12\x16\n" +
-	"\x06result\x18\x02 \x01(\tR\x06result\"\x0e\n" +
+	"\x06result\x18\x02 \x01(\tR\x06result\x12\x18\n" +
+	"\ablocked\x18\x03 \x01(\bR\ablocked\x12\x16\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x12\x16\n" +
+	"\x06branch\x18\x05 \x01(\tR\x06branch\"\x0e\n" +
 	"\fDoneResponse\"B\n" +
 	"\rResultRequest\x12\x18\n" +
 	"\asession\x18\x01 \x01(\tR\asession\x12\x17\n" +

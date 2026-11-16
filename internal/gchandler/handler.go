@@ -87,7 +87,7 @@ func (h *Handler) Run(ctx context.Context, req *connect.Request[roomcityv1.RunRe
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("the session's identity: %w", err))
 	}
-	res, err := h.run(ctx, msg.Session, claimed, msg.Args, msg.Stdin)
+	res, err := h.run(ctx, msg.Session, claimed, msg.Args, msg.Stdin, false)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -105,14 +105,24 @@ type Result struct {
 // session's start and nothing else. A gc that ends with a non-zero code is a
 // Result; one that does not start is an error.
 func (h *Handler) Exec(ctx context.Context, session string, args []string, stdin []byte) (Result, error) {
+	return h.exec(ctx, session, args, stdin, false)
+}
+
+// ExecQuiet is Exec with the command's completion logged at DEBUG rather than
+// INFO. A command that does not start is still logged at ERROR.
+func (h *Handler) ExecQuiet(ctx context.Context, session string, args []string, stdin []byte) (Result, error) {
+	return h.exec(ctx, session, args, stdin, true)
+}
+
+func (h *Handler) exec(ctx context.Context, session string, args []string, stdin []byte, quiet bool) (Result, error) {
 	claimed, err := h.identity(ctx, session, nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("the session's identity: %w", err)
 	}
-	return h.run(ctx, session, claimed, args, stdin)
+	return h.run(ctx, session, claimed, args, stdin, quiet)
 }
 
-func (h *Handler) run(ctx context.Context, session string, claimed map[string]string, args []string, stdin []byte) (Result, error) {
+func (h *Handler) run(ctx context.Context, session string, claimed map[string]string, args []string, stdin []byte, quiet bool) (Result, error) {
 	cmd := exec.CommandContext(ctx, h.cfg.GcPath, args...)
 	cmd.Dir = h.cfg.CityDir
 	cmd.Env = environ(h.cfg.Env, claimed, h.cfg.RuntimeURL)
@@ -130,7 +140,11 @@ func (h *Handler) run(ctx context.Context, session string, claimed map[string]st
 		h.cfg.Log.Error("gc did not start", "session", session, "command", name(args), "err", err)
 		return Result{}, fmt.Errorf("gc: %w", err)
 	}
-	h.cfg.Log.Info("gc ran", "session", session, "command", name(args), "exit", cmd.ProcessState.ExitCode(), "took", time.Since(began).Round(time.Millisecond))
+	level := slog.LevelInfo
+	if quiet {
+		level = slog.LevelDebug
+	}
+	h.cfg.Log.Log(ctx, level, "gc ran", "session", session, "command", name(args), "exit", cmd.ProcessState.ExitCode(), "took", time.Since(began).Round(time.Millisecond))
 	return Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: cmd.ProcessState.ExitCode()}, nil
 }
 

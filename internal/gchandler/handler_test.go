@@ -97,6 +97,17 @@ func TestRunFailsToStart(t *testing.T) {
 	require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
 }
 
+func TestExecQuietFailureToStartStillLogsAnError(t *testing.T) {
+	var logged bytes.Buffer
+	h := New(Config{CityDir: t.TempDir(), GcPath: filepath.Join(t.TempDir(), "absent"),
+		Log: slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))})
+
+	_, err := h.ExecQuiet(context.Background(), "s", []string{"bd", "show", "bd-7", "--json"}, nil)
+	require.Error(t, err)
+	require.Contains(t, logged.String(), `level=ERROR msg="gc did not start"`)
+	require.NotContains(t, logged.String(), "gc ran")
+}
+
 func TestRunRefusesWhatIsNotTheSessionsOwnToken(t *testing.T) {
 	ran := filepath.Join(t.TempDir(), "ran")
 	gc := fakeGc(t, `touch `+ran)
