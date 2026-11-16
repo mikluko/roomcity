@@ -1,4 +1,5 @@
 scope = "city"
+provider = "goose"
 description = "A session started for one task, run to its end without asking the owner"
 max_active_sessions = 2
-option_defaults = { permission_mode = "unrestricted", effort = "medium" }
+env = { GOOSE_MODE = "auto" }

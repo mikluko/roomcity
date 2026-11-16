@@ -1,4 +1,0 @@
-scope = "city"
-description = "Always-on agent in Claude Code: the owner's counterpart in its room"
-max_active_sessions = 1
-option_defaults = { permission_mode = "auto-edit", effort = "medium" }

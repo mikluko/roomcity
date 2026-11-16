@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated: github.com/yuin/goldmark v1.8.7.
+- The `examples/minimal` city has a Claude Code `foreman` that hands work to goose `worker` sessions through the room's tools, replacing the always-on `host` and `guest`.
 
 ## [0.12.0] - 2026-11-16
 

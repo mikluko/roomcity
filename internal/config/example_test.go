@@ -29,7 +29,7 @@ func TestTheExamplesRoomcityTomlLoads(t *testing.T) {
 }
 
 func TestTheExamplesCityFilesParse(t *testing.T) {
-	for _, f := range []string{"city/city.toml", "city/pack.toml", "city/agents/host/agent.toml", "city/agents/guest/agent.toml", "city/agents/worker/agent.toml"} {
+	for _, f := range []string{"city/city.toml", "city/pack.toml", "city/agents/foreman/agent.toml", "city/agents/worker/agent.toml"} {
 		b, err := os.ReadFile(filepath.Join(example, f))
 		require.NoError(t, err, f)
 		var v map[string]any

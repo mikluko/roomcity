@@ -6,11 +6,13 @@ the registration the homeserver takes. It is the configuration of the city the
 runtime is developed against, with the names of that deployment replaced by
 placeholders of the documentation kind (`example.org`).
 
-A city of this directory has three agents. `host` runs Claude Code and `guest`
-runs goose on Kimi's coding API, each always on, with its own room in the city's
-space on Matrix. `worker` is started for one task and has a room for the length
-of it. The owner talks to the agents in their rooms and answers their permission
-requests with a reaction.
+A city of this directory has two agents. `foreman` runs Claude Code, always on,
+with its own room in the city's space on Matrix. The owner talks to it there and
+answers its permission requests with a reaction. Work beyond a short answer goes
+to `worker`, a goose session on Kimi's coding API, started for one task with a
+room for the length of it. The foreman hands the task over with `dispatch` and
+waits with `wait`; the worker takes it with `claim` and reports with `done`; the
+foreman reads the outcome with `result` and tells the owner.
 
 | Directory | What it is |
 |---|---|
@@ -57,8 +59,8 @@ controller reach the proxy.
   `https://city.example.org/oauth2/callback`, and a group `admin` that the
   owner is in.
 - A Git server with the city's repository and a user that can read it.
-- A Claude Code token (for `host` and `worker`) and an API key for Kimi's coding
-  API (for `guest`).
+- A Claude Code token (for `foreman`) and an API key for Kimi's coding API (for
+  `worker`).
 - Egress from the pod: to the Git server, to `github.com` and `sarak.sh`
   (`gc import install` fetches the packs that `city/pack.toml` names from the
   two), to the Dolt server and the homeserver, to Claude Code's API and to
@@ -81,7 +83,7 @@ first: `example.org` ends `city.example.org`, `id.example.org`,
 | `noreply.example.org` | `k8s/files/start.sh` (the city's commit email) | the domain of the identity the city commits as |
 | `example.org` | `k8s/files/roomcity.toml` (`[matrix] server_name`, and the ids of the holders), `registration/sandbox.yaml.template` (both regexes, where it is written `example\.org`: keep the backslash; and its comments) | the homeserver's server name, which is what follows the colon of its Matrix ids and need not be the domain of the other hosts |
 | `@owner:example.org`, `@owner-app:example.org` | `k8s/files/roomcity.toml` (`[[chat.holders]]`) | the Matrix ids that hold the owner's role; remove the block of the second if you have none. An id of the form `@<city>:` or `@<city>-…:` is the application service's: the owner's is not one |
-| `sandbox`, as the city's name | `k8s/statefulset.yaml` (`CITY_NAME`), `k8s/files/roomcity.toml` (`[chat] name`, `[matrix] city`), `registration/sandbox.yaml.template` (`id`, `sender_localpart`, both regexes and its comments), `city/pack.toml` (`[pack] name`), the three `prompt.template.md` of `city/agents`, and step 7 below | the city's name, the same in all of them: lower-case letters and digits, no dash (`roomcity server` refuses a `[matrix] city` that is not `[a-z0-9]+`). `[matrix] city` and the registration's `sender_localpart` must be the same |
+| `sandbox`, as the city's name | `k8s/statefulset.yaml` (`CITY_NAME`), `k8s/files/roomcity.toml` (`[chat] name`, `[matrix] city`), `registration/sandbox.yaml.template` (`id`, `sender_localpart`, both regexes and its comments), `city/pack.toml` (`[pack] name`), the two `prompt.template.md` of `city/agents`, and step 7 below | the city's name, the same in all of them: lower-case letters and digits, no dash (`roomcity server` refuses a `[matrix] city` that is not `[a-z0-9]+`). `[matrix] city` and the registration's `sender_localpart` must be the same |
 | `roomcity-example` | `k8s/kustomization.yaml` (`namespace`), `k8s/namespace.yaml`, `k8s/files/roomcity.toml` (`[kube] namespace`, and `[server] url`, whose host is the Service `roomcity` in that namespace), `registration/sandbox.yaml.template` (`url`, the same address) | the namespace |
 | `http://homeserver.matrix.svc.cluster.local:8008` | `k8s/files/roomcity.toml` (`[matrix] homeserver`) | the homeserver's address in the cluster |
 | `matrix` and `app.kubernetes.io/name: homeserver`; `ingress` and `app.kubernetes.io/name: ingress-controller` | `k8s/network-policy.yaml` | the namespace and the pods' label of your homeserver, and of your ingress controller |
@@ -107,7 +109,7 @@ annotations that make a certificate and a DNS record from the Ingress.
 The host starts Claude Code so that it sends nothing but the model's requests: no usage metrics, error reports, feedback, surveys, update checks or feature-flag fetching. Its OpenTelemetry metrics and logs go to the OTLP endpoint the pod's environment names, and nowhere when it names none. The example names none: the endpoint is the cluster's to give, not a key of `roomcity.toml`. A cluster with the OpenTelemetry operator gives it to the pods of an agent by annotations on them, in the agent's table:
 
 ```toml
-[agents.host]
+[agents.foreman]
 pod_annotations = { "instrumentation.opentelemetry.io/inject-sdk" = "<namespace>/<instrumentation>", "resource.opentelemetry.io/service.name" = "<city>-{agent}", "resource.opentelemetry.io/roomcity.session" = "{session}" }
 ```
 
@@ -146,10 +148,10 @@ server` cuts the whitespace around each. `openssl rand -hex 32` makes one.
    `appservice_dir` names) and restart the homeserver so that it reads the
    registration.
 6. `kubectl apply -k k8s`. The pod starts: `gc` makes the store and the
-   supervisor starts the city's always-on agents, which makes the server start a
-   Job for each.
-7. The city's space and the rooms of `host` and `guest` appear on the homeserver;
-   the owner is invited. Join `#sandbox-host:example.org` and write to it.
+   supervisor starts the city's always-on agent, which makes the server start a
+   Job for it.
+7. The city's space and the room of `foreman` appear on the homeserver; the
+   owner is invited. Join `#sandbox-foreman:example.org` and write to it.
 
 To see what the pod does: `kubectl -n roomcity-example logs roomcity-0 -c gc`
 is the steps of `start.sh` and the supervisor, and `-c roomcity` the server. A

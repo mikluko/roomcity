@@ -15,12 +15,7 @@ source = "https://sarak.sh/mikluko/roomcity.git"
 version = "^0.12"
 
 [[named_session]]
-template = "host"
-scope = "city"
-mode = "always"
-
-[[named_session]]
-template = "guest"
+template = "foreman"
 scope = "city"
 mode = "always"
 

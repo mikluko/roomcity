@@ -1,4 +1,0 @@
-scope = "city"
-provider = "goose"
-description = "Always-on agent in goose on Kimi: the owner's second counterpart, in its room"
-max_active_sessions = 1

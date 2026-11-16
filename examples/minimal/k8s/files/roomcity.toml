@@ -7,34 +7,28 @@ city_dir = "/home/city/city"
 url = "http://roomcity.roomcity-example.svc.cluster.local:8080"
 
 # An agent's own secrets are mounted in its sessions' pods only: Claude Code's
-# token for host and worker, Kimi's key for guest. `env` names the variable the
-# host sets for the agent from the file.
-[agents.host]
+# token for the foreman, Kimi's key for the workers (goose). `env` names the
+# variable the host sets for the agent from the file.
+[agents.foreman]
 always_on = true
+tools = ["dispatch", "wait", "result"]
 
-[[agents.host.secrets]]
+[[agents.foreman.secrets]]
 name = "claude"
 key = "token"
 mount_path = "/run/roomcity/secrets/claude/token"
 env = "CLAUDE_CODE_OAUTH_TOKEN"
 
-[agents.guest]
-always_on = true
+[agents.worker]
+always_on = false
+tools = ["claim", "done"]
+task_timeout = "15m"
 
-[[agents.guest.secrets]]
+[[agents.worker.secrets]]
 name = "kimi"
 key = "api-key"
 mount_path = "/run/roomcity/secrets/kimi/api-key"
 env = "OPENAI_API_KEY"
-
-[agents.worker]
-always_on = false
-
-[[agents.worker.secrets]]
-name = "claude"
-key = "token"
-mount_path = "/run/roomcity/secrets/claude/token"
-env = "CLAUDE_CODE_OAUTH_TOKEN"
 
 [kube]
 namespace = "roomcity-example"
