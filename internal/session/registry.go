@@ -19,7 +19,7 @@ import (
 // schemaVersion is the version of the database's layout, kept in its
 // user_version. A database of an earlier version is migrated when it is
 // opened (migrate), one that is of a later version is refused.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (

@@ -216,10 +216,25 @@ func migrate(ctx context.Context, db *sql.DB, from int) error {
 			return err
 		}
 	}
+	if from < 3 {
+		if err := migrate2To3(tx); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrate2To3 moves the shown cursor of each session to its last event. Version
+// 2 had the column and nothing kept it, so a cursor was where version 2's own
+// migration had put it, at the head of that day; the first server that keeps the
+// cursor must begin it at the head of the day it begins, so that it does not
+// show again what the rooms have shown since.
+func migrate2To3(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE sessions SET shown = COALESCE((SELECT MAX(seq) FROM events WHERE events.session = sessions.name), 0)`)
+	return err
 }
 
 // migrate1To2 adds the gc session id and the shown cursor to the sessions and

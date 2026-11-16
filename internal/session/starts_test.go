@@ -346,7 +346,7 @@ func TestTheServerCopiesTheDatabaseAsItWasBeforeItMigratesIt(t *testing.T) {
 
 	// The database itself is migrated.
 	version, hasStarts = userVersion(t, path)
-	require.Equal(t, 2, version)
+	require.Equal(t, 3, version)
 	require.True(t, hasStarts)
 	starts, err := r.Starts(ctx, "host")
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestACopyThatExistsIsNeverInTheWayOfTheServerNorReplaced(t *testing.T) {
 	version, _ := userVersion(t, r.BackupPath())
 	require.Equal(t, 1, version, "the copy of this try is whole")
 	version, _ = userVersion(t, path)
-	require.Equal(t, 2, version, "and the database is migrated")
+	require.Equal(t, 3, version, "and the database is migrated")
 }
 
 func TestAFailedMigrationLeavesTheDatabaseAndNoCopyThatWouldBlockTheNextTry(t *testing.T) {
@@ -439,4 +439,49 @@ func TestTheCallerSaysHowAStartEnded(t *testing.T) {
 		got, _ := r.Starts(ctx, name)
 		require.Equal(t, want, got[0].How, name)
 	}
+}
+
+func TestADatabaseOfSchemaTwoHasItsShownCursorsMovedToTheHead(t *testing.T) {
+	ctx := ctxT(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "roomcity.db")
+	r := open(t, path)
+	for _, name := range []string{"host", "guest"} {
+		_, err := r.Start(ctx, name, name, session.AlwaysOn)
+		require.NoError(t, err)
+	}
+	for i := uint64(1); i <= 5; i++ {
+		_, err := r.Report(ctx, "guest", []session.HostFrame{{Seq: i, Direction: session.ToAgent, Message: []byte("x")}})
+		require.NoError(t, err)
+	}
+	require.NoError(t, r.Shown(ctx, "guest", 2))
+	require.NoError(t, r.Close())
+
+	// What version 2 left: the version, and cursors behind the head.
+	db, err := sql.Open("sqlite", "file:"+path)
+	require.NoError(t, err)
+	_, err = db.Exec(`PRAGMA user_version = 2`)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET shown = 0 WHERE name = 'host'`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	r = open(t, path)
+	infos, err := r.List(ctx)
+	require.NoError(t, err)
+	shown := map[string]uint64{}
+	for _, i := range infos {
+		shown[i.Name] = i.Shown
+	}
+	require.Equal(t, map[string]uint64{"guest": 6, "host": 1}, shown, "each at its last event: guest's is the Started and five frames")
+
+	version, _ := userVersion(t, path)
+	require.Equal(t, 3, version)
+	require.Equal(t, filepath.Join(dir, "roomcity.v2."), r.BackupPath()[:len(filepath.Join(dir, "roomcity.v2."))], "the copy of version 2 is made")
+	require.NoError(t, r.Close())
+
+	// A database of version 3 is not moved again.
+	r = open(t, path)
+	require.NoError(t, r.Shown(ctx, "host", 1))
+	require.Empty(t, r.BackupPath())
 }
