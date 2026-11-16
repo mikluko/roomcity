@@ -362,7 +362,7 @@ func (s *Service) notice(ctx context.Context, t *agentSession, body string, repl
 
 // commands are the messages that begin with "!" and that the runtime answers
 // itself; the agent never sees one.
-const helpText = "Commands: `!stop` ends the running turn and drops your messages that wait, while gc's nudges stay and are delivered after it; `!help` lists them."
+const helpText = "Commands: `!stop` ends the running turn and drops your messages that wait, while gc's nudges stay and are delivered after it; `!reset` starts the session afresh, and the agent remembers nothing of the one it ends; `!help` lists them."
 
 func (s *Service) command(ctx context.Context, t *agentSession, name string, in Incoming) {
 	word := strings.Fields(in.Body)[0]
@@ -378,6 +378,13 @@ func (s *Service) command(ctx context.Context, t *agentSession, name string, in 
 		default:
 		}
 		s.notice(ctx, t, "Asked the agent to stop: your waiting messages are dropped, gc's nudges stay.", in.Message)
+	case "!reset":
+		if err := s.Sessions.Reset(ctx, name); err != nil {
+			s.Log.Error("resetting a session", "agent", t.agent, "err", err)
+			s.notice(ctx, t, "Could not reset: "+err.Error(), in.Message)
+			return
+		}
+		s.notice(ctx, t, "Asked gc to start the session afresh: it stops and starts again, and the room says when it has begun anew.", in.Message)
 	case "!help":
 		s.notice(ctx, t, helpText, in.Message)
 	default:

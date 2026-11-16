@@ -1,6 +1,7 @@
 package chat_test
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -42,6 +43,39 @@ func TestServiceAnswersCommandsItself(t *testing.T) {
 	require.Contains(t, got[1], "`!stop`")
 	require.Contains(t, got[2], "Unknown command `!what`")
 	require.Contains(t, got[2], "`!help`", "an unknown command is answered with the known ones")
+}
+
+func TestServiceResetsTheSessionWhenAnOwnerAsks(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(alwaysOn("host", session.Running))
+	driver, handle := runService(t, sessions)
+	awaitRoom(t, sessions, handle)
+
+	handle(chat.Incoming{Room: "!host", Sender: "@stranger:test.local", Kind: chat.Text, Body: "!reset"})
+	handle(chat.Incoming{Room: "!host", Sender: owner, Kind: chat.Text, Body: "!reset"})
+	handle(chat.Incoming{Room: "!host", Sender: owner, Kind: chat.Text, Body: "!help"})
+
+	require.Equal(t, []string{"s-host"}, sessions.Resets(), "an owner's, and no stranger's")
+	require.Empty(t, promptsOf(sessions), "the agent never sees it")
+	got := notices(driver)
+	require.Len(t, got, 2)
+	require.Contains(t, got[0], "afresh")
+	require.Contains(t, got[1], "`!reset`", "the help lists it")
+}
+
+func TestServiceSaysWhyAResetCouldNotBeAsked(t *testing.T) {
+	sessions := &chattest.Sessions{ResetErr: errors.New("session s-host: the server has no id of gc's session bead for it")}
+	sessions.Add(alwaysOn("host", session.Running))
+	driver, handle := runService(t, sessions)
+	awaitRoom(t, sessions, handle)
+
+	handle(chat.Incoming{Room: "!host", Sender: owner, Kind: chat.Text, Body: "!reset"})
+
+	got := notices(driver)
+	require.Len(t, got, 1)
+	require.Contains(t, got[0], "Could not reset: ")
+	require.Contains(t, got[0], "no id of gc's session bead")
+	require.Empty(t, sessions.Resets())
 }
 
 func permissionFrame(id string) session.Frame {

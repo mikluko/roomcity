@@ -32,6 +32,8 @@ type Sessions struct {
 
 	// PromptErr, when set, is what Prompt returns, and the prompt is not kept.
 	PromptErr error
+	// ResetErr, when set, is what Reset returns, and the request is not kept.
+	ResetErr error
 }
 
 // PermissionAnswer is a call of AnswerPermission.
@@ -176,6 +178,9 @@ func (s *Sessions) ShownSeq(name string) uint64 {
 func (s *Sessions) Reset(_ context.Context, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ResetErr != nil {
+		return s.ResetErr
+	}
 	s.resets = append(s.resets, name)
 	return nil
 }

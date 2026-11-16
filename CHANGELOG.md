@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `[server] purge_every`, a duration such as `"1m"` (default one hour): how often the transcripts past their `transcript_term` are removed. A short term and a short gap let a transcript be watched going.
+- `!reset` in a room, from a holder of the owner's role, starts the session afresh: the server asks gc, with `gc session reset`, to stop it and start it again, and the room says when it has begun anew. `!help` lists it. A reset that cannot be asked, for a session that is not running or one that has no gc id recorded, is answered with the reason.
 
 ### Changed
 
