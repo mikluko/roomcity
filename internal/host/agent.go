@@ -28,6 +28,9 @@ type agent struct {
 	// stderr holds the last of what a process agent wrote on its standard
 	// error; nil for the agent in this process.
 	stderr *tail
+	// stderrRead is closed when stderr has been read to its end, which is
+	// after the process has gone: the agent's last words can be behind its end.
+	stderrRead chan struct{}
 }
 
 func newAgent(r io.Reader, w io.WriteCloser) *agent {
@@ -88,6 +91,10 @@ func (a *agent) whyEnded() string {
 		parts = append(parts, "the agent ended without an error")
 	}
 	if a.stderr != nil {
+		select {
+		case <-a.stderrRead:
+		case <-time.After(stderrGrace):
+		}
 		if s := a.stderr.String(); s != "" {
 			parts = append(parts, "its standard error: "+s)
 		}
@@ -98,6 +105,11 @@ func (a *agent) whyEnded() string {
 // agentWordGrace is how long the host waits for an agent that closed its
 // connection to be seen to end.
 const agentWordGrace = 5 * time.Second
+
+// stderrGrace is how long the host waits, after the agent has ended, for the
+// last of its standard error: a process the agent left running can hold the
+// pipe open.
+const stderrGrace = time.Second
 
 // stderrTail is how much of an agent's standard error an error keeps.
 const stderrTail = 4 << 10
@@ -245,7 +257,9 @@ func (h *host) startProcess(ctx context.Context, command []string) (*agent, erro
 	}
 	a := newAgent(stdout, stdin)
 	a.stderr = &tail{size: stderrTail}
+	a.stderrRead = make(chan struct{})
 	go func() {
+		defer close(a.stderrRead)
 		defer func() { _ = stderr.Close() }()
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
