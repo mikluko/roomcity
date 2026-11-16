@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,38 @@ type agent struct {
 	r    io.Reader
 	w    io.WriteCloser
 	done chan error
+}
+
+// SecretPrefix starts the name of each variable of the host's environment that
+// names a file holding a secret of the agent: ROOMCITY_SECRET_<NAME>=<path>
+// gives the agent the variable NAME, with the file's content. The server writes
+// them, one for each secret its configuration gives a variable name.
+const SecretPrefix = "ROOMCITY_SECRET_"
+
+// agentEnv is the environment of an agent: env, with each variable that a
+// SecretPrefix entry names set to the content of its file. A file that cannot
+// be read, or is empty, is an error that names the variable and the path; the
+// content is never part of it.
+func agentEnv(env []string) ([]string, error) {
+	out := append([]string(nil), env...)
+	for _, kv := range env {
+		name, path, _ := strings.Cut(kv, "=")
+		variable, ok := strings.CutPrefix(name, SecretPrefix)
+		if !ok || variable == "" {
+			continue
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("host: the file of %s, %s: %w", variable, path, err)
+		}
+		value := strings.TrimSpace(string(b))
+		if value == "" {
+			return nil, fmt.Errorf("host: the file of %s, %s, is empty", variable, path)
+		}
+		out = slices.DeleteFunc(out, func(kv string) bool { return strings.HasPrefix(kv, variable+"=") })
+		out = append(out, variable+"="+value)
+	}
+	return out, nil
 }
 
 // runsClaude says whether command is Claude Code's, which the host drives
@@ -36,6 +70,17 @@ func (h *host) startAgent(ctx context.Context, command []string) (*agent, error)
 		cfg := h.cfg.Claude
 		if len(command) > 1 {
 			cfg.ClaudeArgs = append(append([]string(nil), cfg.ClaudeArgs...), command[1:]...)
+		}
+		// claudeacp starts claude with this process's environment.
+		env, err := agentEnv(os.Environ())
+		if err != nil {
+			return nil, err
+		}
+		for _, kv := range env {
+			name, value, _ := strings.Cut(kv, "=")
+			if os.Getenv(name) != value {
+				_ = os.Setenv(name, value)
+			}
 		}
 		return h.startClaude(ctx, cfg), nil
 	}
@@ -64,7 +109,11 @@ const processGrace = 5 * time.Second
 func (h *host) startProcess(ctx context.Context, command []string) (*agent, error) {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = h.cfg.WorkDir
-	cmd.Env = os.Environ()
+	env, err := agentEnv(os.Environ())
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = processGrace
 	stdin, err := cmd.StdinPipe()
