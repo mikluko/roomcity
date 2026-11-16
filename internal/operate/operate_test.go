@@ -204,7 +204,15 @@ func (h *host) run(ctx context.Context, reg *session.Registry, spec operate.JobS
 }
 
 func TestStartMakesAJobAndReturnsOnlyAfterTheAgentAnswered(t *testing.T) {
-	f := newFixture(t, operate.Config{AlwaysOn: func(a string) bool { return a == "host" }})
+	f := newFixture(t, operate.Config{
+		AlwaysOn: func(a string) bool { return a == "host" },
+		Tools: func(a string) []string {
+			if a == "host" {
+				return []string{"dispatch", "wait"}
+			}
+			return nil
+		},
+	})
 	h := &host{got: make(chan session.Instruction, 8), frames: recording(t)}
 	release := make(chan struct{})
 	f.jobs.onCreate = func(spec operate.JobSpec) {
@@ -238,6 +246,7 @@ func TestStartMakesAJobAndReturnsOnlyAfterTheAgentAnswered(t *testing.T) {
 	spec := f.jobs.created[0]
 	require.Equal(t, "http://roomcity.test:8080", spec.Env["ROOMCITY_SERVER"])
 	require.Equal(t, "/city/.gc/agents/host", spec.Env["ROOMCITY_WORKDIR"])
+	require.Equal(t, "dispatch,wait", spec.Env[operate.ToolsEnv], "the tools of the agent's role, for the host to register")
 	require.Equal(t, "gc-7", spec.Env["GC_SESSION_ID"])
 	require.NotContains(t, spec.Env, "HOME")
 	require.NotContains(t, spec.Env, "GC_CONTROLLER_TOKEN")

@@ -83,33 +83,55 @@ func (h *Handler) Run(ctx context.Context, req *connect.Request[roomcityv1.RunRe
 	if msg.Session == "" || token == "" || h.cfg.Authorize == nil || !h.cfg.Authorize(msg.Session, token) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the session's token is missing or not its own"))
 	}
-	cmd := exec.CommandContext(ctx, h.cfg.GcPath, msg.Args...)
-	cmd.Dir = h.cfg.CityDir
-	claimed, err := h.identity(ctx, msg)
+	claimed, err := h.identity(ctx, msg.Session, msg.Env)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("the session's identity: %w", err))
 	}
+	res, err := h.run(ctx, msg.Session, claimed, msg.Args, msg.Stdin)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&roomcityv1.RunResponse{Stdout: res.Stdout, Stderr: res.Stderr, ExitCode: int32(res.ExitCode)}), nil
+}
+
+// Result is what a gc that ran answered.
+type Result struct {
+	Stdout, Stderr []byte
+	ExitCode       int
+}
+
+// Exec runs gc for the server's own purposes as the session, which the
+// caller has already authorized: the identity is the server's record of the
+// session's start and nothing else. A gc that ends with a non-zero code is a
+// Result; one that does not start is an error.
+func (h *Handler) Exec(ctx context.Context, session string, args []string, stdin []byte) (Result, error) {
+	claimed, err := h.identity(ctx, session, nil)
+	if err != nil {
+		return Result{}, fmt.Errorf("the session's identity: %w", err)
+	}
+	return h.run(ctx, session, claimed, args, stdin)
+}
+
+func (h *Handler) run(ctx context.Context, session string, claimed map[string]string, args []string, stdin []byte) (Result, error) {
+	cmd := exec.CommandContext(ctx, h.cfg.GcPath, args...)
+	cmd.Dir = h.cfg.CityDir
 	cmd.Env = environ(h.cfg.Env, claimed, h.cfg.RuntimeURL)
-	cmd.Stdin = bytes.NewReader(msg.Stdin)
+	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
 	began := time.Now()
-	err = cmd.Run()
+	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
 	case errors.As(err, &exit):
 	default:
-		h.cfg.Log.Error("gc did not start", "session", msg.Session, "command", name(msg.Args), "err", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("gc: %w", err))
+		h.cfg.Log.Error("gc did not start", "session", session, "command", name(args), "err", err)
+		return Result{}, fmt.Errorf("gc: %w", err)
 	}
-	h.cfg.Log.Info("gc ran", "session", msg.Session, "command", name(msg.Args), "exit", cmd.ProcessState.ExitCode(), "took", time.Since(began).Round(time.Millisecond))
-	return connect.NewResponse(&roomcityv1.RunResponse{
-		Stdout:   stdout.Bytes(),
-		Stderr:   stderr.Bytes(),
-		ExitCode: int32(cmd.ProcessState.ExitCode()),
-	}), nil
+	h.cfg.Log.Info("gc ran", "session", session, "command", name(args), "exit", cmd.ProcessState.ExitCode(), "took", time.Since(began).Round(time.Millisecond))
+	return Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: cmd.ProcessState.ExitCode()}, nil
 }
 
 // name is the command and, after it, the subcommand: the words gc's own
@@ -140,13 +162,13 @@ func plain(s string) bool {
 
 // identity returns the variables gc is to take as the caller's: the server's
 // record of the session's start where it has one, the request's otherwise.
-func (h *Handler) identity(ctx context.Context, msg *roomcityv1.RunRequest) (map[string]string, error) {
+func (h *Handler) identity(ctx context.Context, session string, requested map[string]string) (map[string]string, error) {
 	if h.cfg.Identity == nil {
-		return msg.Env, nil
+		return requested, nil
 	}
-	rec, ok, err := h.cfg.Identity(ctx, msg.Session)
+	rec, ok, err := h.cfg.Identity(ctx, session)
 	if err != nil || !ok {
-		return msg.Env, err
+		return requested, err
 	}
 	return rec, nil
 }

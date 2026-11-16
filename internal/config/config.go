@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -76,7 +78,18 @@ type Agent struct {
 	// Secrets are mounted in the pods of this agent's sessions and of no
 	// other's, on top of those of [kube].
 	Secrets []kube.Secret `toml:"secrets"`
+	// Tools are the tools of the room's MCP server, besides attach, that this
+	// agent's sessions have, of RoomTools: the foreman's dispatch, wait and
+	// result, a worker's claim and done.
+	Tools []string `toml:"tools"`
 }
+
+// RoomTools are the tools of the room that an agent has only when the
+// configuration gives them: they hand work between sessions through gc.
+var RoomTools = []string{"dispatch", "wait", "result", "claim", "done"}
+
+// AgentTools returns the tools of the room that the agent's sessions have.
+func (c Config) AgentTools(agent string) []string { return c.Agents[agent].Tools }
 
 // AgentSecrets returns the Secrets each agent's sessions get of their own.
 func (c Config) AgentSecrets() map[string][]kube.Secret {
@@ -166,6 +179,13 @@ func (c *Config) validate() error {
 		return errors.New("kube.namespace and kube.image are required")
 	case s.StartTimeout < 0 || s.StopGrace < 0 || s.TranscriptTerm < 0 || s.PurgeEvery < 0:
 		return errors.New("a timeout or a term is negative")
+	}
+	for name, a := range c.Agents {
+		for _, tool := range a.Tools {
+			if !slices.Contains(RoomTools, tool) {
+				return fmt.Errorf("agents.%s.tools: %q is not a tool of the room; the tools are %s", name, tool, strings.Join(RoomTools, ", "))
+			}
+		}
 	}
 	for key, addr := range map[string]string{"server.runtime_listen": s.RuntimeListen, "server.page_listen": s.PageListen} {
 		if err := loopback(addr); err != nil {

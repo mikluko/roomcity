@@ -21,6 +21,7 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/chat"
 	"sarak.sh/mikluko/roomcity/internal/config"
 	"sarak.sh/mikluko/roomcity/internal/gchandler"
+	"sarak.sh/mikluko/roomcity/internal/gcwork"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
 	"sarak.sh/mikluko/roomcity/internal/operate"
 	"sarak.sh/mikluko/roomcity/internal/procs"
@@ -163,19 +164,23 @@ func Run(ctx context.Context, o Options) error {
 		files = roomFiles{side.Service}
 	}
 
-	s := server.New()
-	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: files, MaxFile: maxFile, Log: log}))
-	s.Handle(roomcityv1connect.NewGcServiceHandler(gchandler.New(gchandler.Config{
+	gc := gchandler.New(gchandler.Config{
 		CityDir:    cfg.Server.CityDir,
 		GcPath:     cfg.Server.Gc,
 		Authorize:  reg.Authorize,
 		Identity:   reg.Identity,
 		RuntimeURL: "http://" + o.Listeners.Runtime.Addr().String(),
 		Log:        log,
-	})))
+	})
+	work := &gcwork.Work{Gc: gc, Marks: reg}
+
+	s := server.New()
+	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: files, MaxFile: maxFile, Work: work, Tools: cfg.AgentTools, Log: log}))
+	s.Handle(roomcityv1connect.NewGcServiceHandler(gc))
 	s.HandleRuntime(roomcityv1connect.NewRuntimeServiceHandler(operate.New(reg, o.Jobs, operate.Config{
 		ServerURL:    cfg.Server.URL,
 		AlwaysOn:     cfg.AlwaysOn,
+		Tools:        cfg.AgentTools,
 		StartTimeout: cfg.Server.StartTimeout.Duration(),
 		StopGrace:    cfg.Server.StopGrace.Duration(),
 		IsProcess:    cfg.IsProcess,

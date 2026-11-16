@@ -43,6 +43,16 @@ const (
 	HostServiceHandledProcedure = "/roomcity.v1.HostService/Handled"
 	// HostServiceSendProcedure is the fully-qualified name of the HostService's Send RPC.
 	HostServiceSendProcedure = "/roomcity.v1.HostService/Send"
+	// HostServiceDispatchProcedure is the fully-qualified name of the HostService's Dispatch RPC.
+	HostServiceDispatchProcedure = "/roomcity.v1.HostService/Dispatch"
+	// HostServiceWaitProcedure is the fully-qualified name of the HostService's Wait RPC.
+	HostServiceWaitProcedure = "/roomcity.v1.HostService/Wait"
+	// HostServiceClaimProcedure is the fully-qualified name of the HostService's Claim RPC.
+	HostServiceClaimProcedure = "/roomcity.v1.HostService/Claim"
+	// HostServiceDoneProcedure is the fully-qualified name of the HostService's Done RPC.
+	HostServiceDoneProcedure = "/roomcity.v1.HostService/Done"
+	// HostServiceResultProcedure is the fully-qualified name of the HostService's Result RPC.
+	HostServiceResultProcedure = "/roomcity.v1.HostService/Result"
 )
 
 // HostServiceClient is a client for the roomcity.v1.HostService service.
@@ -65,6 +75,21 @@ type HostServiceClient interface {
 	// Send hands the server a file of the session's working directory to put
 	// in the session's room, and answers with the room's event for it.
 	Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error)
+	// Dispatch gives a task to the pool of workers and answers with the task's
+	// id. Only a session whose agent has the tool dispatch may call it.
+	Dispatch(context.Context, *connect.Request[v1.DispatchRequest]) (*connect.Response[v1.DispatchResponse], error)
+	// Wait asks to be told when a task is closed; the telling arrives as gc's
+	// own prompt, later. Only a session whose agent has the tool wait.
+	Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error)
+	// Claim takes the task the session was started for. Only a session whose
+	// agent has the tool claim.
+	Claim(context.Context, *connect.Request[v1.ClaimRequest]) (*connect.Response[v1.ClaimResponse], error)
+	// Done closes the task the session claimed with what came of it, and has gc
+	// end the session. Only a session whose agent has the tool done.
+	Done(context.Context, *connect.Request[v1.DoneRequest]) (*connect.Response[v1.DoneResponse], error)
+	// Result tells how a dispatched task stands and, once it is closed, what
+	// came of it. Only a session whose agent has the tool result.
+	Result(context.Context, *connect.Request[v1.ResultRequest]) (*connect.Response[v1.ResultResponse], error)
 }
 
 // NewHostServiceClient constructs a client for the roomcity.v1.HostService service. By default, it
@@ -108,16 +133,51 @@ func NewHostServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(hostServiceMethods.ByName("Send")),
 			connect.WithClientOptions(opts...),
 		),
+		dispatch: connect.NewClient[v1.DispatchRequest, v1.DispatchResponse](
+			httpClient,
+			baseURL+HostServiceDispatchProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Dispatch")),
+			connect.WithClientOptions(opts...),
+		),
+		wait: connect.NewClient[v1.WaitRequest, v1.WaitResponse](
+			httpClient,
+			baseURL+HostServiceWaitProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Wait")),
+			connect.WithClientOptions(opts...),
+		),
+		claim: connect.NewClient[v1.ClaimRequest, v1.ClaimResponse](
+			httpClient,
+			baseURL+HostServiceClaimProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Claim")),
+			connect.WithClientOptions(opts...),
+		),
+		done: connect.NewClient[v1.DoneRequest, v1.DoneResponse](
+			httpClient,
+			baseURL+HostServiceDoneProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Done")),
+			connect.WithClientOptions(opts...),
+		),
+		result: connect.NewClient[v1.ResultRequest, v1.ResultResponse](
+			httpClient,
+			baseURL+HostServiceResultProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Result")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // hostServiceClient implements HostServiceClient.
 type hostServiceClient struct {
-	attach  *connect.Client[v1.AttachRequest, v1.AttachResponse]
-	report  *connect.Client[v1.ReportRequest, v1.ReportResponse]
-	stage   *connect.Client[v1.StageRequest, v1.StageResponse]
-	handled *connect.Client[v1.HandledRequest, v1.HandledResponse]
-	send    *connect.Client[v1.SendRequest, v1.SendResponse]
+	attach   *connect.Client[v1.AttachRequest, v1.AttachResponse]
+	report   *connect.Client[v1.ReportRequest, v1.ReportResponse]
+	stage    *connect.Client[v1.StageRequest, v1.StageResponse]
+	handled  *connect.Client[v1.HandledRequest, v1.HandledResponse]
+	send     *connect.Client[v1.SendRequest, v1.SendResponse]
+	dispatch *connect.Client[v1.DispatchRequest, v1.DispatchResponse]
+	wait     *connect.Client[v1.WaitRequest, v1.WaitResponse]
+	claim    *connect.Client[v1.ClaimRequest, v1.ClaimResponse]
+	done     *connect.Client[v1.DoneRequest, v1.DoneResponse]
+	result   *connect.Client[v1.ResultRequest, v1.ResultResponse]
 }
 
 // Attach calls roomcity.v1.HostService.Attach.
@@ -145,6 +205,31 @@ func (c *hostServiceClient) Send(ctx context.Context, req *connect.Request[v1.Se
 	return c.send.CallUnary(ctx, req)
 }
 
+// Dispatch calls roomcity.v1.HostService.Dispatch.
+func (c *hostServiceClient) Dispatch(ctx context.Context, req *connect.Request[v1.DispatchRequest]) (*connect.Response[v1.DispatchResponse], error) {
+	return c.dispatch.CallUnary(ctx, req)
+}
+
+// Wait calls roomcity.v1.HostService.Wait.
+func (c *hostServiceClient) Wait(ctx context.Context, req *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error) {
+	return c.wait.CallUnary(ctx, req)
+}
+
+// Claim calls roomcity.v1.HostService.Claim.
+func (c *hostServiceClient) Claim(ctx context.Context, req *connect.Request[v1.ClaimRequest]) (*connect.Response[v1.ClaimResponse], error) {
+	return c.claim.CallUnary(ctx, req)
+}
+
+// Done calls roomcity.v1.HostService.Done.
+func (c *hostServiceClient) Done(ctx context.Context, req *connect.Request[v1.DoneRequest]) (*connect.Response[v1.DoneResponse], error) {
+	return c.done.CallUnary(ctx, req)
+}
+
+// Result calls roomcity.v1.HostService.Result.
+func (c *hostServiceClient) Result(ctx context.Context, req *connect.Request[v1.ResultRequest]) (*connect.Response[v1.ResultResponse], error) {
+	return c.result.CallUnary(ctx, req)
+}
+
 // HostServiceHandler is an implementation of the roomcity.v1.HostService service.
 type HostServiceHandler interface {
 	// Attach opens the stream of instructions for one session. A host that
@@ -165,6 +250,21 @@ type HostServiceHandler interface {
 	// Send hands the server a file of the session's working directory to put
 	// in the session's room, and answers with the room's event for it.
 	Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error)
+	// Dispatch gives a task to the pool of workers and answers with the task's
+	// id. Only a session whose agent has the tool dispatch may call it.
+	Dispatch(context.Context, *connect.Request[v1.DispatchRequest]) (*connect.Response[v1.DispatchResponse], error)
+	// Wait asks to be told when a task is closed; the telling arrives as gc's
+	// own prompt, later. Only a session whose agent has the tool wait.
+	Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error)
+	// Claim takes the task the session was started for. Only a session whose
+	// agent has the tool claim.
+	Claim(context.Context, *connect.Request[v1.ClaimRequest]) (*connect.Response[v1.ClaimResponse], error)
+	// Done closes the task the session claimed with what came of it, and has gc
+	// end the session. Only a session whose agent has the tool done.
+	Done(context.Context, *connect.Request[v1.DoneRequest]) (*connect.Response[v1.DoneResponse], error)
+	// Result tells how a dispatched task stands and, once it is closed, what
+	// came of it. Only a session whose agent has the tool result.
+	Result(context.Context, *connect.Request[v1.ResultRequest]) (*connect.Response[v1.ResultResponse], error)
 }
 
 // NewHostServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -204,6 +304,36 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(hostServiceMethods.ByName("Send")),
 		connect.WithHandlerOptions(opts...),
 	)
+	hostServiceDispatchHandler := connect.NewUnaryHandler(
+		HostServiceDispatchProcedure,
+		svc.Dispatch,
+		connect.WithSchema(hostServiceMethods.ByName("Dispatch")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostServiceWaitHandler := connect.NewUnaryHandler(
+		HostServiceWaitProcedure,
+		svc.Wait,
+		connect.WithSchema(hostServiceMethods.ByName("Wait")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostServiceClaimHandler := connect.NewUnaryHandler(
+		HostServiceClaimProcedure,
+		svc.Claim,
+		connect.WithSchema(hostServiceMethods.ByName("Claim")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostServiceDoneHandler := connect.NewUnaryHandler(
+		HostServiceDoneProcedure,
+		svc.Done,
+		connect.WithSchema(hostServiceMethods.ByName("Done")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostServiceResultHandler := connect.NewUnaryHandler(
+		HostServiceResultProcedure,
+		svc.Result,
+		connect.WithSchema(hostServiceMethods.ByName("Result")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/roomcity.v1.HostService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HostServiceAttachProcedure:
@@ -216,6 +346,16 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 			hostServiceHandledHandler.ServeHTTP(w, r)
 		case HostServiceSendProcedure:
 			hostServiceSendHandler.ServeHTTP(w, r)
+		case HostServiceDispatchProcedure:
+			hostServiceDispatchHandler.ServeHTTP(w, r)
+		case HostServiceWaitProcedure:
+			hostServiceWaitHandler.ServeHTTP(w, r)
+		case HostServiceClaimProcedure:
+			hostServiceClaimHandler.ServeHTTP(w, r)
+		case HostServiceDoneProcedure:
+			hostServiceDoneHandler.ServeHTTP(w, r)
+		case HostServiceResultProcedure:
+			hostServiceResultHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -243,4 +383,24 @@ func (UnimplementedHostServiceHandler) Handled(context.Context, *connect.Request
 
 func (UnimplementedHostServiceHandler) Send(context.Context, *connect.Request[v1.SendRequest]) (*connect.Response[v1.SendResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Send is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Dispatch(context.Context, *connect.Request[v1.DispatchRequest]) (*connect.Response[v1.DispatchResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Dispatch is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Wait is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Claim(context.Context, *connect.Request[v1.ClaimRequest]) (*connect.Response[v1.ClaimResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Claim is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Done(context.Context, *connect.Request[v1.DoneRequest]) (*connect.Response[v1.DoneResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Done is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Result(context.Context, *connect.Request[v1.ResultRequest]) (*connect.Response[v1.ResultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("roomcity.v1.HostService.Result is not implemented"))
 }

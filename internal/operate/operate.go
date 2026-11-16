@@ -77,6 +77,9 @@ type Config struct {
 	// AlwaysOn says whether the agent's sessions are always-on; any other
 	// agent's are started for a task.
 	AlwaysOn func(agent string) bool
+	// Tools returns the tools of the room that the agent's sessions have
+	// besides attach; the host registers these and no others. Nil is none.
+	Tools func(agent string) []string
 	// StartTimeout is how long start waits for the host to attach and the
 	// agent to answer session/new; 0 is 100 seconds, inside gc's 120.
 	StartTimeout time.Duration
@@ -93,6 +96,17 @@ type Config struct {
 	Processes Processes
 	// Log is where the server says what it did not do; nil is slog's default.
 	Log *slog.Logger
+}
+
+// ToolsEnv is the variable of the session's pod that names, by commas, the
+// tools of the room it has besides attach.
+const ToolsEnv = "ROOMCITY_ROOM_TOOLS"
+
+func (c Config) tools(agent string) []string {
+	if c.Tools == nil {
+		return nil
+	}
+	return c.Tools(agent)
 }
 
 func (c Config) log() *slog.Logger {
@@ -439,6 +453,9 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 		"ROOMCITY_SERVER":  o.cfg.ServerURL,
 		"ROOMCITY_WORKDIR": sc.WorkDir,
 	}, sc.Env)
+	if tools := o.cfg.tools(agent); len(tools) > 0 {
+		env[ToolsEnv] = strings.Join(tools, ",")
+	}
 	if len(heldBack) > 0 {
 		o.cfg.log().Info("variables gc set for the agent that the pod has of its own", "session", name, "left_out", heldBack)
 	}

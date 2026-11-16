@@ -746,6 +746,501 @@ func (x *SendResponse) GetEvent() string {
 	return ""
 }
 
+type DispatchRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Session string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	// What the worker is to do, in full.
+	Task          string `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DispatchRequest) Reset() {
+	*x = DispatchRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchRequest) ProtoMessage() {}
+
+func (x *DispatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchRequest.ProtoReflect.Descriptor instead.
+func (*DispatchRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DispatchRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+func (x *DispatchRequest) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+type DispatchResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The task's id, which Wait takes.
+	TaskId        string `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DispatchResponse) Reset() {
+	*x = DispatchResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchResponse) ProtoMessage() {}
+
+func (x *DispatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchResponse.ProtoReflect.Descriptor instead.
+func (*DispatchResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DispatchResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type WaitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Session       string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitRequest) Reset() {
+	*x = WaitRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitRequest) ProtoMessage() {}
+
+func (x *WaitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitRequest.ProtoReflect.Descriptor instead.
+func (*WaitRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WaitRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+func (x *WaitRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type WaitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitResponse) Reset() {
+	*x = WaitResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitResponse) ProtoMessage() {}
+
+func (x *WaitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitResponse.ProtoReflect.Descriptor instead.
+func (*WaitResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{12}
+}
+
+type ClaimRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Session       string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimRequest) Reset() {
+	*x = ClaimRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimRequest) ProtoMessage() {}
+
+func (x *ClaimRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimRequest.ProtoReflect.Descriptor instead.
+func (*ClaimRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ClaimRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+type ClaimResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// False when there is no task: gc has been asked to end the session.
+	Found  bool   `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	TaskId string `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// The task as it was given: its title, then its description if it has one.
+	Text          string `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimResponse) Reset() {
+	*x = ClaimResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimResponse) ProtoMessage() {}
+
+func (x *ClaimResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimResponse.ProtoReflect.Descriptor instead.
+func (*ClaimResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ClaimResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *ClaimResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ClaimResponse) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type DoneRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Session string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	// What came of the task, for the one who dispatched it to read.
+	Result        string `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DoneRequest) Reset() {
+	*x = DoneRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DoneRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DoneRequest) ProtoMessage() {}
+
+func (x *DoneRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DoneRequest.ProtoReflect.Descriptor instead.
+func (*DoneRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *DoneRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+func (x *DoneRequest) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+type DoneResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DoneResponse) Reset() {
+	*x = DoneResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DoneResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DoneResponse) ProtoMessage() {}
+
+func (x *DoneResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DoneResponse.ProtoReflect.Descriptor instead.
+func (*DoneResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{16}
+}
+
+type ResultRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Session       string                 `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResultRequest) Reset() {
+	*x = ResultRequest{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResultRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResultRequest) ProtoMessage() {}
+
+func (x *ResultRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResultRequest.ProtoReflect.Descriptor instead.
+func (*ResultRequest) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ResultRequest) GetSession() string {
+	if x != nil {
+		return x.Session
+	}
+	return ""
+}
+
+func (x *ResultRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type ResultResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether the task is closed; the result is only then what Done stored.
+	Closed bool `protobuf:"varint,1,opt,name=closed,proto3" json:"closed,omitempty"`
+	// The task's state as gc's store names it, such as open or closed.
+	Status        string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Result        string `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResultResponse) Reset() {
+	*x = ResultResponse{}
+	mi := &file_roomcity_v1_host_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResultResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResultResponse) ProtoMessage() {}
+
+func (x *ResultResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_roomcity_v1_host_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResultResponse.ProtoReflect.Descriptor instead.
+func (*ResultResponse) Descriptor() ([]byte, []int) {
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ResultResponse) GetClosed() bool {
+	if x != nil {
+		return x.Closed
+	}
+	return false
+}
+
+func (x *ResultResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ResultResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
 // Stop ends the agent and the host with it.
 type Stop struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -755,7 +1250,7 @@ type Stop struct {
 
 func (x *Stop) Reset() {
 	*x = Stop{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	mi := &file_roomcity_v1_host_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -767,7 +1262,7 @@ func (x *Stop) String() string {
 func (*Stop) ProtoMessage() {}
 
 func (x *Stop) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[9]
+	mi := &file_roomcity_v1_host_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -780,7 +1275,7 @@ func (x *Stop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Stop.ProtoReflect.Descriptor instead.
 func (*Stop) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{9}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{19}
 }
 
 type ReportRequest struct {
@@ -793,7 +1288,7 @@ type ReportRequest struct {
 
 func (x *ReportRequest) Reset() {
 	*x = ReportRequest{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	mi := &file_roomcity_v1_host_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -805,7 +1300,7 @@ func (x *ReportRequest) String() string {
 func (*ReportRequest) ProtoMessage() {}
 
 func (x *ReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[10]
+	mi := &file_roomcity_v1_host_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -818,7 +1313,7 @@ func (x *ReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
 func (*ReportRequest) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{10}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReportRequest) GetSession() string {
@@ -845,7 +1340,7 @@ type ReportResponse struct {
 
 func (x *ReportResponse) Reset() {
 	*x = ReportResponse{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	mi := &file_roomcity_v1_host_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -857,7 +1352,7 @@ func (x *ReportResponse) String() string {
 func (*ReportResponse) ProtoMessage() {}
 
 func (x *ReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[11]
+	mi := &file_roomcity_v1_host_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -870,7 +1365,7 @@ func (x *ReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportResponse.ProtoReflect.Descriptor instead.
 func (*ReportResponse) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{11}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReportResponse) GetLastSeq() uint64 {
@@ -895,7 +1390,7 @@ type Frame struct {
 
 func (x *Frame) Reset() {
 	*x = Frame{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[12]
+	mi := &file_roomcity_v1_host_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -907,7 +1402,7 @@ func (x *Frame) String() string {
 func (*Frame) ProtoMessage() {}
 
 func (x *Frame) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[12]
+	mi := &file_roomcity_v1_host_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -920,7 +1415,7 @@ func (x *Frame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Frame.ProtoReflect.Descriptor instead.
 func (*Frame) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{12}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Frame) GetSeq() uint64 {
@@ -960,7 +1455,7 @@ type StageRequest struct {
 
 func (x *StageRequest) Reset() {
 	*x = StageRequest{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[13]
+	mi := &file_roomcity_v1_host_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -972,7 +1467,7 @@ func (x *StageRequest) String() string {
 func (*StageRequest) ProtoMessage() {}
 
 func (x *StageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[13]
+	mi := &file_roomcity_v1_host_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -985,7 +1480,7 @@ func (x *StageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StageRequest.ProtoReflect.Descriptor instead.
 func (*StageRequest) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{13}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StageRequest) GetSession() string {
@@ -1008,7 +1503,7 @@ type StageResponse struct {
 
 func (x *StageResponse) Reset() {
 	*x = StageResponse{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[14]
+	mi := &file_roomcity_v1_host_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1515,7 @@ func (x *StageResponse) String() string {
 func (*StageResponse) ProtoMessage() {}
 
 func (x *StageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[14]
+	mi := &file_roomcity_v1_host_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1528,7 @@ func (x *StageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StageResponse.ProtoReflect.Descriptor instead.
 func (*StageResponse) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{14}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *StageResponse) GetPart() isStageResponse_Part {
@@ -1104,7 +1599,7 @@ type StageManifest struct {
 
 func (x *StageManifest) Reset() {
 	*x = StageManifest{}
-	mi := &file_roomcity_v1_host_proto_msgTypes[15]
+	mi := &file_roomcity_v1_host_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1116,7 +1611,7 @@ func (x *StageManifest) String() string {
 func (*StageManifest) ProtoMessage() {}
 
 func (x *StageManifest) ProtoReflect() protoreflect.Message {
-	mi := &file_roomcity_v1_host_proto_msgTypes[15]
+	mi := &file_roomcity_v1_host_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1129,7 +1624,7 @@ func (x *StageManifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StageManifest.ProtoReflect.Descriptor instead.
 func (*StageManifest) Descriptor() ([]byte, []int) {
-	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{15}
+	return file_roomcity_v1_host_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *StageManifest) GetCommand() []string {
@@ -1205,7 +1700,33 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\acaption\x18\x04 \x01(\tR\acaption\x12\x12\n" +
 	"\x04data\x18\x05 \x01(\fR\x04data\"$\n" +
 	"\fSendResponse\x12\x14\n" +
-	"\x05event\x18\x01 \x01(\tR\x05event\"\x06\n" +
+	"\x05event\x18\x01 \x01(\tR\x05event\"?\n" +
+	"\x0fDispatchRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\x12\x12\n" +
+	"\x04task\x18\x02 \x01(\tR\x04task\"+\n" +
+	"\x10DispatchResponse\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"@\n" +
+	"\vWaitRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\x0e\n" +
+	"\fWaitResponse\"(\n" +
+	"\fClaimRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\"R\n" +
+	"\rClaimResponse\x12\x14\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"?\n" +
+	"\vDoneRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\x12\x16\n" +
+	"\x06result\x18\x02 \x01(\tR\x06result\"\x0e\n" +
+	"\fDoneResponse\"B\n" +
+	"\rResultRequest\x12\x18\n" +
+	"\asession\x18\x01 \x01(\tR\asession\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"X\n" +
+	"\x0eResultResponse\x12\x16\n" +
+	"\x06closed\x18\x01 \x01(\bR\x06closed\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
+	"\x06result\x18\x03 \x01(\tR\x06result\"\x06\n" +
 	"\x04Stop\"U\n" +
 	"\rReportRequest\x12\x18\n" +
 	"\asession\x18\x01 \x01(\tR\asession\x12*\n" +
@@ -1241,13 +1762,18 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\x0eFrameDirection\x12\x1f\n" +
 	"\x1bFRAME_DIRECTION_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18FRAME_DIRECTION_TO_AGENT\x10\x01\x12\x1e\n" +
-	"\x1aFRAME_DIRECTION_FROM_AGENT\x10\x022\xda\x02\n" +
+	"\x1aFRAME_DIRECTION_FROM_AGENT\x10\x022\xa0\x05\n" +
 	"\vHostService\x12C\n" +
 	"\x06Attach\x12\x1a.roomcity.v1.AttachRequest\x1a\x1b.roomcity.v1.AttachResponse0\x01\x12A\n" +
 	"\x06Report\x12\x1a.roomcity.v1.ReportRequest\x1a\x1b.roomcity.v1.ReportResponse\x12@\n" +
 	"\x05Stage\x12\x19.roomcity.v1.StageRequest\x1a\x1a.roomcity.v1.StageResponse0\x01\x12D\n" +
 	"\aHandled\x12\x1b.roomcity.v1.HandledRequest\x1a\x1c.roomcity.v1.HandledResponse\x12;\n" +
-	"\x04Send\x12\x18.roomcity.v1.SendRequest\x1a\x19.roomcity.v1.SendResponseB\xa8\x01\n" +
+	"\x04Send\x12\x18.roomcity.v1.SendRequest\x1a\x19.roomcity.v1.SendResponse\x12G\n" +
+	"\bDispatch\x12\x1c.roomcity.v1.DispatchRequest\x1a\x1d.roomcity.v1.DispatchResponse\x12;\n" +
+	"\x04Wait\x12\x18.roomcity.v1.WaitRequest\x1a\x19.roomcity.v1.WaitResponse\x12>\n" +
+	"\x05Claim\x12\x19.roomcity.v1.ClaimRequest\x1a\x1a.roomcity.v1.ClaimResponse\x12;\n" +
+	"\x04Done\x12\x18.roomcity.v1.DoneRequest\x1a\x19.roomcity.v1.DoneResponse\x12A\n" +
+	"\x06Result\x12\x1a.roomcity.v1.ResultRequest\x1a\x1b.roomcity.v1.ResultResponseB\xa8\x01\n" +
 	"\x0fcom.roomcity.v1B\tHostProtoP\x01Z=sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1;roomcityv1\xa2\x02\x03RXX\xaa\x02\vRoomcity.V1\xca\x02\vRoomcity\\V1\xe2\x02\x17Roomcity\\V1\\GPBMetadata\xea\x02\fRoomcity::V1b\x06proto3"
 
 var (
@@ -1263,7 +1789,7 @@ func file_roomcity_v1_host_proto_rawDescGZIP() []byte {
 }
 
 var file_roomcity_v1_host_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_roomcity_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_roomcity_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_roomcity_v1_host_proto_goTypes = []any{
 	(PromptSource)(0),             // 0: roomcity.v1.PromptSource
 	(Handling)(0),                 // 1: roomcity.v1.Handling
@@ -1277,38 +1803,58 @@ var file_roomcity_v1_host_proto_goTypes = []any{
 	(*HandledResponse)(nil),       // 9: roomcity.v1.HandledResponse
 	(*SendRequest)(nil),           // 10: roomcity.v1.SendRequest
 	(*SendResponse)(nil),          // 11: roomcity.v1.SendResponse
-	(*Stop)(nil),                  // 12: roomcity.v1.Stop
-	(*ReportRequest)(nil),         // 13: roomcity.v1.ReportRequest
-	(*ReportResponse)(nil),        // 14: roomcity.v1.ReportResponse
-	(*Frame)(nil),                 // 15: roomcity.v1.Frame
-	(*StageRequest)(nil),          // 16: roomcity.v1.StageRequest
-	(*StageResponse)(nil),         // 17: roomcity.v1.StageResponse
-	(*StageManifest)(nil),         // 18: roomcity.v1.StageManifest
-	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	(*DispatchRequest)(nil),       // 12: roomcity.v1.DispatchRequest
+	(*DispatchResponse)(nil),      // 13: roomcity.v1.DispatchResponse
+	(*WaitRequest)(nil),           // 14: roomcity.v1.WaitRequest
+	(*WaitResponse)(nil),          // 15: roomcity.v1.WaitResponse
+	(*ClaimRequest)(nil),          // 16: roomcity.v1.ClaimRequest
+	(*ClaimResponse)(nil),         // 17: roomcity.v1.ClaimResponse
+	(*DoneRequest)(nil),           // 18: roomcity.v1.DoneRequest
+	(*DoneResponse)(nil),          // 19: roomcity.v1.DoneResponse
+	(*ResultRequest)(nil),         // 20: roomcity.v1.ResultRequest
+	(*ResultResponse)(nil),        // 21: roomcity.v1.ResultResponse
+	(*Stop)(nil),                  // 22: roomcity.v1.Stop
+	(*ReportRequest)(nil),         // 23: roomcity.v1.ReportRequest
+	(*ReportResponse)(nil),        // 24: roomcity.v1.ReportResponse
+	(*Frame)(nil),                 // 25: roomcity.v1.Frame
+	(*StageRequest)(nil),          // 26: roomcity.v1.StageRequest
+	(*StageResponse)(nil),         // 27: roomcity.v1.StageResponse
+	(*StageManifest)(nil),         // 28: roomcity.v1.StageManifest
+	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
 }
 var file_roomcity_v1_host_proto_depIdxs = []int32{
 	5,  // 0: roomcity.v1.AttachResponse.prompt:type_name -> roomcity.v1.Prompt
 	6,  // 1: roomcity.v1.AttachResponse.cancel:type_name -> roomcity.v1.Cancel
 	7,  // 2: roomcity.v1.AttachResponse.permission_answer:type_name -> roomcity.v1.PermissionAnswer
-	12, // 3: roomcity.v1.AttachResponse.stop:type_name -> roomcity.v1.Stop
+	22, // 3: roomcity.v1.AttachResponse.stop:type_name -> roomcity.v1.Stop
 	0,  // 4: roomcity.v1.Prompt.source:type_name -> roomcity.v1.PromptSource
 	1,  // 5: roomcity.v1.HandledRequest.handling:type_name -> roomcity.v1.Handling
-	15, // 6: roomcity.v1.ReportRequest.frames:type_name -> roomcity.v1.Frame
-	19, // 7: roomcity.v1.Frame.time:type_name -> google.protobuf.Timestamp
+	25, // 6: roomcity.v1.ReportRequest.frames:type_name -> roomcity.v1.Frame
+	29, // 7: roomcity.v1.Frame.time:type_name -> google.protobuf.Timestamp
 	2,  // 8: roomcity.v1.Frame.direction:type_name -> roomcity.v1.FrameDirection
-	18, // 9: roomcity.v1.StageResponse.manifest:type_name -> roomcity.v1.StageManifest
+	28, // 9: roomcity.v1.StageResponse.manifest:type_name -> roomcity.v1.StageManifest
 	3,  // 10: roomcity.v1.HostService.Attach:input_type -> roomcity.v1.AttachRequest
-	13, // 11: roomcity.v1.HostService.Report:input_type -> roomcity.v1.ReportRequest
-	16, // 12: roomcity.v1.HostService.Stage:input_type -> roomcity.v1.StageRequest
+	23, // 11: roomcity.v1.HostService.Report:input_type -> roomcity.v1.ReportRequest
+	26, // 12: roomcity.v1.HostService.Stage:input_type -> roomcity.v1.StageRequest
 	8,  // 13: roomcity.v1.HostService.Handled:input_type -> roomcity.v1.HandledRequest
 	10, // 14: roomcity.v1.HostService.Send:input_type -> roomcity.v1.SendRequest
-	4,  // 15: roomcity.v1.HostService.Attach:output_type -> roomcity.v1.AttachResponse
-	14, // 16: roomcity.v1.HostService.Report:output_type -> roomcity.v1.ReportResponse
-	17, // 17: roomcity.v1.HostService.Stage:output_type -> roomcity.v1.StageResponse
-	9,  // 18: roomcity.v1.HostService.Handled:output_type -> roomcity.v1.HandledResponse
-	11, // 19: roomcity.v1.HostService.Send:output_type -> roomcity.v1.SendResponse
-	15, // [15:20] is the sub-list for method output_type
-	10, // [10:15] is the sub-list for method input_type
+	12, // 15: roomcity.v1.HostService.Dispatch:input_type -> roomcity.v1.DispatchRequest
+	14, // 16: roomcity.v1.HostService.Wait:input_type -> roomcity.v1.WaitRequest
+	16, // 17: roomcity.v1.HostService.Claim:input_type -> roomcity.v1.ClaimRequest
+	18, // 18: roomcity.v1.HostService.Done:input_type -> roomcity.v1.DoneRequest
+	20, // 19: roomcity.v1.HostService.Result:input_type -> roomcity.v1.ResultRequest
+	4,  // 20: roomcity.v1.HostService.Attach:output_type -> roomcity.v1.AttachResponse
+	24, // 21: roomcity.v1.HostService.Report:output_type -> roomcity.v1.ReportResponse
+	27, // 22: roomcity.v1.HostService.Stage:output_type -> roomcity.v1.StageResponse
+	9,  // 23: roomcity.v1.HostService.Handled:output_type -> roomcity.v1.HandledResponse
+	11, // 24: roomcity.v1.HostService.Send:output_type -> roomcity.v1.SendResponse
+	13, // 25: roomcity.v1.HostService.Dispatch:output_type -> roomcity.v1.DispatchResponse
+	15, // 26: roomcity.v1.HostService.Wait:output_type -> roomcity.v1.WaitResponse
+	17, // 27: roomcity.v1.HostService.Claim:output_type -> roomcity.v1.ClaimResponse
+	19, // 28: roomcity.v1.HostService.Done:output_type -> roomcity.v1.DoneResponse
+	21, // 29: roomcity.v1.HostService.Result:output_type -> roomcity.v1.ResultResponse
+	20, // [20:30] is the sub-list for method output_type
+	10, // [10:20] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -1325,7 +1871,7 @@ func file_roomcity_v1_host_proto_init() {
 		(*AttachResponse_PermissionAnswer)(nil),
 		(*AttachResponse_Stop)(nil),
 	}
-	file_roomcity_v1_host_proto_msgTypes[14].OneofWrappers = []any{
+	file_roomcity_v1_host_proto_msgTypes[24].OneofWrappers = []any{
 		(*StageResponse_Manifest)(nil),
 		(*StageResponse_Archive)(nil),
 	}
@@ -1335,7 +1881,7 @@ func file_roomcity_v1_host_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_roomcity_v1_host_proto_rawDesc), len(file_roomcity_v1_host_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   16,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

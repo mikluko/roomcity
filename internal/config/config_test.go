@@ -192,3 +192,21 @@ func TestASecretMountedInsideTheHomeIsRefusedAndOneOutsideMayNameItsPathVariable
 	_, err = config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.guest]\nsecrets = [{ name = \"kimi\", key = \"k\", mount_path = \"/home/city/.kimi/key\" }]\n\n[kube]", 1)))
 	require.ErrorContains(t, err, "agents.guest.secrets[0]")
 }
+
+func TestAnAgentNamesTheToolsOfTheRoomItHas(t *testing.T) {
+	c, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", `
+[agents.foreman]
+tools = ["dispatch", "wait", "result"]
+
+[agents.worker]
+tools = ["claim", "done"]
+
+[kube]`, 1)))
+	require.NoError(t, err)
+	require.Equal(t, []string{"dispatch", "wait", "result"}, c.AgentTools("foreman"))
+	require.Equal(t, []string{"claim", "done"}, c.AgentTools("worker"))
+	require.Empty(t, c.AgentTools("other"))
+
+	_, err = config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.foreman]\ntools = [\"dispach\"]\n\n[kube]", 1)))
+	require.ErrorContains(t, err, `"dispach" is not a tool of the room`)
+}

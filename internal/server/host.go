@@ -27,6 +27,12 @@ type Host struct {
 	Registry *session.Registry
 	// Files is where a file goes to the room; nil is a server with no chat side.
 	Files Files
+	// Work carries out the tools that hand work between sessions, and Tools
+	// says which of dispatch, wait, claim and done an agent's sessions have;
+	// a session of an agent that lacks the tool is refused. Without either,
+	// every one is refused.
+	Work  Work
+	Tools func(agent string) []string
 	// MaxFile is the most bytes of a file that Send takes; zero is DefaultMaxFile.
 	MaxFile int64
 	Log     *slog.Logger

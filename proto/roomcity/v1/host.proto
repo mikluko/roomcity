@@ -26,6 +26,21 @@ service HostService {
   // Send hands the server a file of the session's working directory to put
   // in the session's room, and answers with the room's event for it.
   rpc Send(SendRequest) returns (SendResponse);
+  // Dispatch gives a task to the pool of workers and answers with the task's
+  // id. Only a session whose agent has the tool dispatch may call it.
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+  // Wait asks to be told when a task is closed; the telling arrives as gc's
+  // own prompt, later. Only a session whose agent has the tool wait.
+  rpc Wait(WaitRequest) returns (WaitResponse);
+  // Claim takes the task the session was started for. Only a session whose
+  // agent has the tool claim.
+  rpc Claim(ClaimRequest) returns (ClaimResponse);
+  // Done closes the task the session claimed with what came of it, and has gc
+  // end the session. Only a session whose agent has the tool done.
+  rpc Done(DoneRequest) returns (DoneResponse);
+  // Result tells how a dispatched task stands and, once it is closed, what
+  // came of it. Only a session whose agent has the tool result.
+  rpc Result(ResultRequest) returns (ResultResponse);
 }
 
 message AttachRequest {
@@ -105,6 +120,57 @@ message SendRequest {
 message SendResponse {
   // The room's event that carries the file.
   string event = 1;
+}
+
+message DispatchRequest {
+  string session = 1;
+  // What the worker is to do, in full.
+  string task = 2;
+}
+
+message DispatchResponse {
+  // The task's id, which Wait takes.
+  string task_id = 1;
+}
+
+message WaitRequest {
+  string session = 1;
+  string task_id = 2;
+}
+
+message WaitResponse {}
+
+message ClaimRequest {
+  string session = 1;
+}
+
+message ClaimResponse {
+  // False when there is no task: gc has been asked to end the session.
+  bool found = 1;
+  string task_id = 2;
+  // The task as it was given: its title, then its description if it has one.
+  string text = 3;
+}
+
+message DoneRequest {
+  string session = 1;
+  // What came of the task, for the one who dispatched it to read.
+  string result = 2;
+}
+
+message DoneResponse {}
+
+message ResultRequest {
+  string session = 1;
+  string task_id = 2;
+}
+
+message ResultResponse {
+  // Whether the task is closed; the result is only then what Done stored.
+  bool closed = 1;
+  // The task's state as gc's store names it, such as open or closed.
+  string status = 2;
+  string result = 3;
 }
 
 // Handling is what became of a prompt in the host.
