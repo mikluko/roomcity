@@ -80,9 +80,6 @@ type Options struct {
 	Log  *slog.Logger
 }
 
-// purgeEvery is how often the transcripts past their term are removed.
-const purgeEvery = time.Hour
-
 // resetter asks gc to reset a session: `gc session reset <id of its bead>`, run
 // in the city's directory as gc's own command through the server, as the stand-in
 // gc's calls are. gc stops the session's runtime and starts it again, which
@@ -184,7 +181,7 @@ func Run(ctx context.Context, o Options) error {
 		g.Go(func() error { return side.Service.Run(ctx) })
 	}
 	g.Go(func() error {
-		purgeTranscripts(ctx, reg, cfg.Server.TranscriptTerm.Duration(), purgeEvery, log)
+		purgeTranscripts(ctx, reg, cfg.Server.TranscriptTerm.Duration(), cfg.Server.PurgeEvery.Duration(), log)
 		return nil
 	})
 	for _, l := range []struct {

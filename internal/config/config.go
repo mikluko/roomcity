@@ -59,6 +59,9 @@ type Server struct {
 	// TranscriptTerm is how long a session's transcript is kept after the
 	// session ends, as a duration such as "2160h"; 0 means 90 days.
 	TranscriptTerm Duration `toml:"transcript_term"`
+	// PurgeEvery is how often the transcripts past their term are removed,
+	// as a duration such as "1h"; 0 means an hour.
+	PurgeEvery Duration `toml:"purge_every"`
 }
 
 // Agent is the table [agents.<name>].
@@ -108,6 +111,7 @@ const (
 	DefaultRuntimeListen  = "127.0.0.1:8082"
 	DefaultPageListen     = "127.0.0.1:8081"
 	DefaultTranscriptTerm = 90 * 24 * time.Hour
+	DefaultPurgeEvery     = time.Hour
 )
 
 // Load reads and validates the file at path.
@@ -155,6 +159,9 @@ func (c *Config) defaults() {
 	if s.TranscriptTerm == 0 {
 		s.TranscriptTerm = Duration(DefaultTranscriptTerm)
 	}
+	if s.PurgeEvery == 0 {
+		s.PurgeEvery = Duration(DefaultPurgeEvery)
+	}
 }
 
 func (c *Config) validate() error {
@@ -170,7 +177,7 @@ func (c *Config) validate() error {
 		return errors.New("server.url is required")
 	case c.Kube.Namespace == "" || c.Kube.Image == "":
 		return errors.New("kube.namespace and kube.image are required")
-	case s.StartTimeout < 0 || s.StopGrace < 0 || s.TranscriptTerm < 0:
+	case s.StartTimeout < 0 || s.StopGrace < 0 || s.TranscriptTerm < 0 || s.PurgeEvery < 0:
 		return errors.New("a timeout or a term is negative")
 	}
 	for key, addr := range map[string]string{"server.runtime_listen": s.RuntimeListen, "server.page_listen": s.PageListen} {

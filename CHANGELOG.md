@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `[server] purge_every`, a duration such as `"1m"` (default one hour): how often the transcripts past their `transcript_term` are removed. A short term and a short gap let a transcript be watched going.
+
 ### Changed
 
 - The variables by which gc knows who is calling (`GC_AGENT`, `GC_ALIAS`, `GC_SESSION_ID`, `GC_SESSION_NAME`, `GC_TEMPLATE`, `GC_SESSION_ORIGIN`, `GC_INSTANCE_TOKEN`, `GC_CONTINUATION_EPOCH`, `GC_RUNTIME_EPOCH`, `GC_PROVIDER`, `GC_STARTUP_PROMPT_DELIVERED`) are set from what the server kept of the session's start, in the session's marks, and no longer from what each request says, so that a session cannot speak to gc as another. The first three are the marks gc itself stamps in a session's life, and are read at each call. A session started before this release has no record and is still taken at its word, until it is started again.
