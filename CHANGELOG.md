@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The chat side no longer loops on a room whose holder has joined. Inviting someone who was in a room already, as every holder is after the first start, was answered "cannot invite user that is joined or banned", which was taken as the room not being made, and tried again every five seconds with the rest of the room's setup never reached. The driver reads the room's membership first and invites only those who are not in it; a banned holder is left as they are, with a word in the log the first time.
+- The host starts Claude Code from gc's command: it no longer passes on `--session-id` and `--resume` with their values, which claudeacp refuses and which made every `host` start end at once.
+- A host's error carries the data of an ACP error, which its message leaves out (for goose's `session/new` "Internal error").
 
 ## [0.3.1] - 2026-11-16
 

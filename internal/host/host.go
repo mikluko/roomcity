@@ -6,6 +6,7 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -255,14 +256,14 @@ func (h *host) fatal(err error) {
 func (h *host) session(ctx context.Context) error {
 	hello, err := h.conn.Initialize(ctx, &acp.InitializeRequest{ProtocolVersion: acp.LatestProtocolVersion, ClientCapabilities: &acp.ClientCapabilities{}})
 	if err != nil {
-		return fmt.Errorf("host: initialize: %w", err)
+		return fmt.Errorf("host: initialize: %w%s", err, errorData(err))
 	}
 	h.mu.Lock()
 	h.steering = steering.Supported(hello.Meta)
 	h.mu.Unlock()
 	res, err := h.conn.NewSession(ctx, &acp.NewSessionRequest{Cwd: h.cfg.WorkDir, MCPServers: []acp.MCPServer{}})
 	if err != nil {
-		return fmt.Errorf("host: new session: %w", err)
+		return fmt.Errorf("host: new session: %w%s", err, errorData(err))
 	}
 	h.mu.Lock()
 	h.sid = res.SessionID
@@ -280,4 +281,21 @@ func wait(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// errorData returns the data an ACP error carries, which its message leaves
+// out, as " (data: ...)", or "" when there is none.
+func errorData(err error) string {
+	var e *acp.Error
+	if !errors.As(err, &e) || e.Data == nil {
+		return ""
+	}
+	b, merr := json.Marshal(e.Data)
+	if merr != nil || len(b) == 0 || string(b) == "null" {
+		return ""
+	}
+	if len(b) > 500 {
+		b = append(b[:500:500], "..."...)
+	}
+	return " (data: " + string(b) + ")"
 }

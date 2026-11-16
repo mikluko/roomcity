@@ -150,7 +150,7 @@ func (h *host) startAgent(ctx context.Context, command []string) (*agent, error)
 			cfg.Log = h.log
 		}
 		if len(command) > 1 {
-			cfg.ClaudeArgs = append(append([]string(nil), cfg.ClaudeArgs...), command[1:]...)
+			cfg.ClaudeArgs = append(append([]string(nil), cfg.ClaudeArgs...), withoutSessionFlags(command[1:])...)
 		}
 		// claudeacp starts claude with this process's environment.
 		env, err := agentEnv(os.Environ())
@@ -166,6 +166,25 @@ func (h *host) startAgent(ctx context.Context, command []string) (*agent, error)
 		return h.startClaude(ctx, cfg), nil
 	}
 	return h.startProcess(ctx, command)
+}
+
+// withoutSessionFlags drops the flags gc adds to name, resume or fork claude's
+// session, with their values where they have one: claudeacp names, resumes and
+// forks each session itself and refuses them.
+func withoutSessionFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--session-id" || a == "--resume" || a == "-r":
+			i++
+		case strings.HasPrefix(a, "--session-id=") || strings.HasPrefix(a, "--resume="):
+		case a == "--fork-session":
+		default:
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // startClaude serves claudeacp in this process, over two pipes.
