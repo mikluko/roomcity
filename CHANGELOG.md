@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-16
+
 ### Fixed
 
 - The chat side no longer loops on a room whose holder has joined. Inviting someone who was in a room already, as every holder is after the first start, was answered "cannot invite user that is joined or banned", which was taken as the room not being made, and tried again every five seconds with the rest of the room's setup never reached. The driver reads the room's membership first and invites only those who are not in it; a banned holder is left as they are, with a word in the log the first time.
@@ -80,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pack, which declares the session runtime `room` with the command `gc-runtime-room`.
 - The image `sarak.sh/mikluko/roomcity`, with `roomcity`, `gc` built from commit 294079d of gascity's `main`, `bd` 1.3.4, `dolt` 2.7.2, `git`, Claude Code 2.1.311 and goose 1.59.1.
 
-[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.1...HEAD
+[Unreleased]: https://sarak.sh/mikluko/roomcity/compare/v0.3.2...HEAD
+[0.3.2]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.2
 [0.3.1]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.1
 [0.3.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.3.0
 [0.2.0]: https://sarak.sh/mikluko/roomcity/releases/tag/v0.2.0
