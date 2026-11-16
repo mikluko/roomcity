@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,7 +29,15 @@ case "$1" in
 sling) cat > "$LOG.stdin"; echo '{"schema_version":"1","ok":true,"success":true,"target":"worker","bead_id":"bd-7"}' ;;
 hook) echo "$HOOK" ;;
 bd) case "$2" in
-    show) [ -z "$SHOW_FAILS" ] || { echo "bd: no such bead" >&2; exit 1; }
+    show) if [ -n "$SHOW_MISSING" ] || [ -e "$SHOW_MISSING_FILE" ]; then
+            echo "Issue $3 not found" >&2
+            echo '{"error":"no issues found matching the provided IDs","hint":"Check the issue ID and try again","schema_version":1}'
+            exit 1
+        fi
+        if [ -n "$SHOW_FAILS" ] || [ -e "$SHOW_FAILS_FILE" ]; then
+            echo "bd: store unavailable" >&2
+            exit 1
+        fi
         echo "[{\"id\":\"bd-7\",\"title\":\"count the words\",\"description\":\"in a.txt\",\"status\":\"${STATUS:-in_progress}\",\"notes\":\"nine words\",\"metadata\":{\"gc.work_outcome\":\"${OUTCOME:-no-op}\",\"n\":5,\"flag\":true}}]" ;;
     close) [ -n "$CLOSE_FAILS" ] && { echo "bd: no such bead" >&2; exit 1; } ;;
     esac ;;
@@ -139,6 +148,12 @@ type running []session.Info
 
 func (r running) List(context.Context) ([]session.Info, error) { return r, nil }
 
+type gcFunc func(context.Context, string, []string, []byte) (gchandler.Result, error)
+
+func (f gcFunc) Exec(ctx context.Context, session string, args []string, stdin []byte) (gchandler.Result, error) {
+	return f(ctx, session, args, stdin)
+}
+
 func TestWaitIsKeptAndTheSessionIsToldWhenTheTaskIsClosedOnce(t *testing.T) {
 	w, m, log := work(t, "STATUS=closed")
 	n := &nudges{}
@@ -223,9 +238,9 @@ func TestDoneWritesCommitAndBranchAsJSONStrings(t *testing.T) {
 }
 
 func TestWaitRefusesATaskGcCannotReadAndStoresNothing(t *testing.T) {
-	w, m, log := work(t, "SHOW_FAILS=1")
+	w, m, log := work(t, "SHOW_MISSING=1")
 	err := w.Wait(context.Background(), "foreman-1", "bd-404")
-	require.ErrorContains(t, err, "no such bead")
+	require.ErrorContains(t, err, "Issue bd-404 not found")
 	require.Empty(t, m)
 	require.Equal(t, []string{"bd show bd-404 --json"}, ran(t, log))
 }
@@ -244,17 +259,181 @@ func TestPollReadsAtDebugAndAnAgentReadAtInfo(t *testing.T) {
 	require.NotContains(t, logged.String(), `level=INFO msg="gc ran"`)
 }
 
-func TestAFailedPollReadIsQuietAndItsFailureIsLogged(t *testing.T) {
+func TestThreeNotFoundAnswersDropTheWaitAndTellOnce(t *testing.T) {
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	w, m, _ := workWithLogger(t, logger, "SHOW_MISSING=1")
+	n := &nudges{}
+	w.Nudge = n.nudge
+	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+
+	for range 2 {
+		w.Poll(context.Background())
+		require.Empty(t, n.sent)
+		require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+		require.NotContains(t, logged.String(), `level=WARN`)
+	}
+	w.Poll(context.Background())
+	require.Equal(t, []string{"foreman-1: Task bd-7 can no longer be read, so it is no longer waited for and its result cannot be read."}, n.sent)
+	require.Empty(t, m["foreman-1/"+gcwork.WaitsMark])
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+	require.Contains(t, logged.String(), `level=WARN msg="a waited task can no longer be read" session=foreman-1 task=bd-7 err="gc bd show failed (exit 1): Issue bd-7 not found"`)
+
+	w.Poll(context.Background())
+	require.Len(t, n.sent, 1, "told once")
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+}
+
+func TestTenOtherReadFailuresKeepTheWaitAndWarnOnce(t *testing.T) {
 	var logged bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	w, m, _ := workWithLogger(t, logger, "SHOW_FAILS=1")
-	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	n := &nudges{}
+	w.Nudge = n.nudge
 	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
 
 	w.Poll(context.Background())
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`), "the first failure warns")
+	for range 9 {
+		w.Poll(context.Background())
+	}
+
+	require.Empty(t, n.sent)
+	require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+	require.Contains(t, logged.String(), `level=WARN msg="a waited task read failed" session=foreman-1 task=bd-7 err="gc bd show failed (exit 1): bd: store unavailable"`)
 	require.Contains(t, logged.String(), `level=DEBUG msg="gc ran"`)
-	require.Contains(t, logged.String(), `level=WARN msg="reading a task a session waits for"`)
 	require.NotContains(t, logged.String(), `level=INFO msg="gc ran"`)
+}
+
+func TestReadErrorsKeepTheWaitAndWarnOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"gc does not start", errors.New("gc did not start")},
+		{"the read times out", context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logged bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			w, m, _ := workWithLogger(t, logger)
+			w.Gc = gcFunc(func(context.Context, string, []string, []byte) (gchandler.Result, error) {
+				return gchandler.Result{}, tc.err
+			})
+			n := &nudges{}
+			w.Nudge = n.nudge
+			w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+			m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+
+			for range 10 {
+				w.Poll(context.Background())
+			}
+			require.Empty(t, n.sent)
+			require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+			require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+		})
+	}
+}
+
+func TestASuccessfulReadRestartsTheMissingAnswerCount(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "show-missing")
+	w, m, _ := work(t, "SHOW_MISSING_FILE="+marker)
+	n := &nudges{}
+	w.Nudge = n.nudge
+	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+
+	for range 2 {
+		w.Poll(context.Background())
+	}
+	require.NoError(t, os.Remove(marker))
+	w.Poll(context.Background())
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+	for range 2 {
+		w.Poll(context.Background())
+	}
+
+	require.Empty(t, n.sent)
+	require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+}
+
+func TestASuccessfulReadResetsTheOtherFailureWarning(t *testing.T) {
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	marker := filepath.Join(t.TempDir(), "show-fails")
+	w, m, _ := workWithLogger(t, logger, "SHOW_FAILS_FILE="+marker)
+	n := &nudges{}
+	w.Nudge = n.nudge
+	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+
+	w.Poll(context.Background())
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+	require.NoError(t, os.Remove(marker))
+	w.Poll(context.Background())
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+	w.Poll(context.Background())
+
+	require.Equal(t, 2, strings.Count(logged.String(), `level=WARN`))
+	require.Empty(t, n.sent)
+	require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+}
+
+func TestAnotherFailureInterruptsTheMissingAnswerCount(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "show-missing")
+	unavailable := filepath.Join(dir, "show-fails")
+	w, m, _ := work(t, "SHOW_MISSING_FILE="+missing, "SHOW_FAILS_FILE="+unavailable)
+	n := &nudges{}
+	w.Nudge = n.nudge
+	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	require.NoError(t, os.WriteFile(missing, nil, 0o600))
+
+	for range 2 {
+		w.Poll(context.Background())
+	}
+	require.NoError(t, os.Remove(missing))
+	require.NoError(t, os.WriteFile(unavailable, nil, 0o600))
+	w.Poll(context.Background())
+	require.NoError(t, os.Remove(unavailable))
+	require.NoError(t, os.WriteFile(missing, nil, 0o600))
+	for range 2 {
+		w.Poll(context.Background())
+	}
+
+	require.Empty(t, n.sent)
+	require.Equal(t, "bd-7", m["foreman-1/"+gcwork.WaitsMark])
+}
+
+func TestRewritingWaitsForgetsRemovedReadFailures(t *testing.T) {
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	w, m, _ := workWithLogger(t, logger)
+	w.Gc = gcFunc(func(_ context.Context, _ string, args []string, _ []byte) (gchandler.Result, error) {
+		if args[2] == "bd-8" {
+			return gchandler.Result{Stdout: []byte(`[{"status":"closed","notes":"done","metadata":{}}]`)}, nil
+		}
+		return gchandler.Result{Stderr: []byte("bd: store unavailable"), ExitCode: 1}, nil
+	})
+	n := &nudges{}
+	w.Nudge = n.nudge
+	w.Sessions = running{{Name: "foreman-1", State: session.Running}}
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	w.Poll(context.Background())
+	require.Equal(t, 1, strings.Count(logged.String(), `level=WARN`))
+
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-8"
+	w.Poll(context.Background())
+	require.Empty(t, m["foreman-1/"+gcwork.WaitsMark])
+	m["foreman-1/"+gcwork.WaitsMark] = "bd-7"
+	w.Poll(context.Background())
+	require.Equal(t, 2, strings.Count(logged.String(), `level=WARN`), "the removed task's warning state was forgotten")
 }
 
 func TestATaskIdThatIsNoBeadsIdNeverReachesGc(t *testing.T) {

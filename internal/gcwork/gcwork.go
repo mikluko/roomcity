@@ -20,8 +20,8 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/session"
 )
 
-// WaitsMark is the session's mark that holds, by commas, the tasks it asked to
-// be told of when they are closed.
+// WaitsMark is the session's mark that holds, by commas, the tasks it asked
+// the server to watch.
 const WaitsMark = session.WaitsMark
 
 // ClaimedMark is the session's mark that holds the task it claimed, for done.
@@ -64,8 +64,8 @@ type Work struct {
 	Gc    Gc
 	Marks Marks
 	Pool  string
-	// Sessions and Nudge are what the telling of a closed task needs: the
-	// running sessions, and a prompt marked as gc's for one of them.
+	// Sessions and Nudge are what telling a session about a waited task needs:
+	// the running sessions, and a prompt marked as gc's for one of them.
 	Sessions interface {
 		List(ctx context.Context) ([]session.Info, error)
 	}
@@ -73,8 +73,20 @@ type Work struct {
 	// Log gets what Poll cannot do; nil is slog.Default.
 	Log *slog.Logger
 
-	locks sync.Map // session name -> *sync.Mutex
+	locks        sync.Map // session name -> *sync.Mutex
+	readFailures sync.Map // waitedTask -> readFailureState
 }
+
+type waitedTask struct {
+	session, task string
+}
+
+type readFailureState struct {
+	missing int
+	warned  bool
+}
+
+const maxWaitMissingAnswers = 3
 
 // lock serializes the acts on one session's task and returns the unlock.
 func (w *Work) lock(session string) func() {
@@ -204,9 +216,9 @@ func (w *Work) Run(ctx context.Context, every time.Duration) {
 	}
 }
 
-// Poll tells each running session of the tasks it waits for that are closed
-// now, once, and stops its waiting for them. A task that cannot be read is
-// tried again.
+// Poll tells each running session once of a waited task that is closed, or
+// that gc has answered with a JSON error object three times in a row. Any
+// other failed read keeps the wait and warns once until a read succeeds.
 func (w *Work) Poll(ctx context.Context) {
 	log := w.Log
 	if log == nil {
@@ -233,12 +245,15 @@ func (w *Work) pollSession(ctx context.Context, log *slog.Logger, name string) {
 	}
 	var still []string
 	for _, id := range waits {
+		key := waitedTask{session: name, task: id}
 		closed, _, result, outcome, err := w.pollResult(ctx, name, id)
 		if err != nil {
-			log.Warn("reading a task a session waits for", "session", name, "task", id, "err", err)
-			still = append(still, id)
+			if w.keepAfterReadFailure(ctx, log, key, err) {
+				still = append(still, id)
+			}
 			continue
 		}
+		w.readFailures.Delete(key)
 		if !closed {
 			still = append(still, id)
 			continue
@@ -251,8 +266,57 @@ func (w *Work) pollSession(ctx context.Context, log *slog.Logger, name string) {
 	if len(still) != len(waits) {
 		if err := w.Marks.SetMark(ctx, name, WaitsMark, strings.Join(still, ",")); err != nil {
 			log.Error("forgetting the tasks a session was told of", "session", name, "err", err)
+		} else {
+			w.forgetRemovedReadFailures(name, still)
 		}
 	}
+}
+
+func (w *Work) forgetRemovedReadFailures(name string, waits []string) {
+	w.readFailures.Range(func(key, _ any) bool {
+		k := key.(waitedTask)
+		if k.session == name && !slices.Contains(waits, k.task) {
+			w.readFailures.Delete(key)
+		}
+		return true
+	})
+}
+
+// keepAfterReadFailure reports whether a wait remains after a failed read. A
+// gc error answer counts towards dropping it; any other failure keeps it and
+// warns once until a read succeeds.
+func (w *Work) keepAfterReadFailure(ctx context.Context, log *slog.Logger, key waitedTask, readErr error) bool {
+	state := readFailureState{}
+	if previous, ok := w.readFailures.Load(key); ok {
+		state = previous.(readFailureState)
+	}
+	var missing *missingTaskError
+	if !errors.As(readErr, &missing) {
+		state.missing = 0
+		if !state.warned {
+			log.Warn("a waited task read failed", "session", key.session, "task", key.task, "err", readErr)
+			state.warned = true
+		}
+		w.readFailures.Store(key, state)
+		return true
+	}
+	state.missing++
+	w.readFailures.Store(key, state)
+	if state.missing < maxWaitMissingAnswers {
+		return true
+	}
+	if state.missing == maxWaitMissingAnswers {
+		log.Warn("a waited task can no longer be read", "session", key.session, "task", key.task, "err", readErr)
+	}
+	if err := w.Nudge(ctx, key.session, unreadableText(key.task)); err != nil {
+		log.Error("telling a session that its task can no longer be read", "session", key.session, "task", key.task, "err", err)
+		return true
+	}
+	return false
+}
+
+func unreadableText(id string) string {
+	return fmt.Sprintf("Task %s can no longer be read, so it is no longer waited for and its result cannot be read.", id)
 }
 
 // closedText is the telling: the task, how it ended, and where the answer is.
@@ -277,6 +341,13 @@ func (w *Work) pollResult(ctx context.Context, session, task string) (closed boo
 	return w.readResult(ctx, session, task, true)
 }
 
+type missingTaskError struct {
+	err error
+}
+
+func (e *missingTaskError) Error() string { return e.err.Error() }
+func (e *missingTaskError) Unwrap() error { return e.err }
+
 func (w *Work) readResult(ctx context.Context, session, task string, quiet bool) (closed bool, status, result, outcome string, err error) {
 	if err := checkID(task); err != nil {
 		return false, "", "", "", err
@@ -288,6 +359,9 @@ func (w *Work) readResult(ctx context.Context, session, task string, quiet bool)
 		out, err = w.gc(ctx, session, nil, "bd", "show", task, "--json")
 	}
 	if err != nil {
+		if gcErrorAnswer(out) {
+			err = &missingTaskError{err: err}
+		}
 		return false, "", "", "", err
 	}
 	var beads []struct {
@@ -306,6 +380,15 @@ func (w *Work) readResult(ctx context.Context, session, task string, quiet bool)
 	}
 	outcome, _ = b.Metadata["gc.work_outcome"].(string)
 	return true, b.Status, b.Notes, outcome, nil
+}
+
+func gcErrorAnswer(out []byte) bool {
+	var answer map[string]json.RawMessage
+	if err := json.Unmarshal(out, &answer); err != nil {
+		return false
+	}
+	_, ok := answer["error"]
+	return ok
 }
 
 // Claim takes the task the session was started for, and returns its id and

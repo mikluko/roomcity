@@ -590,8 +590,8 @@ func (r *Registry) SetMark(ctx context.Context, name, key, value string) error {
 	return err
 }
 
-// WaitsMark is the session's mark that holds the tasks it asked to be told of
-// when they are closed. Unlike the marks of a start, it survives ClearMarks.
+// WaitsMark is the session's mark that holds the tasks it asked the server to
+// watch. Unlike the marks of a start, it survives ClearMarks.
 const WaitsMark = "roomcity.waits"
 
 // Mark returns the session's mark key, "" when it is not set, as it is for a
