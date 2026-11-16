@@ -210,3 +210,28 @@ tools = ["claim", "done"]
 	_, err = config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.foreman]\ntools = [\"dispach\"]\n\n[kube]", 1)))
 	require.ErrorContains(t, err, `"dispach" is not a tool of the room`)
 }
+
+func TestPodAnnotationsOfTheKubeTableAndOfAnAgentAreReadAndChecked(t *testing.T) {
+	c, err := config.Parse([]byte(minimal + `
+pod_annotations = { "example.org/inject" = "ns/name", "example.org/service" = "city-{agent}" }
+
+[agents.foreman]
+pod_annotations = { "example.org/service" = "{session}" }
+`))
+	require.NoError(t, err)
+	require.Equal(t, "ns/name", c.Kube.PodAnnotations["example.org/inject"])
+	require.Equal(t, map[string]map[string]string{"foreman": {"example.org/service": "{session}"}}, c.AgentPodAnnotations())
+
+	_, err = config.Parse([]byte(minimal + "\npod_annotations = { \"Example.org/Name\" = \"x\" }\n"))
+	require.NoError(t, err, "Kubernetes takes a key in any case, as it lower-cases it first")
+
+	for name, doc := range map[string]string{
+		"kube key":   minimal + "\npod_annotations = { \"not a key!\" = \"x\" }\n",
+		"kube value": minimal + "\npod_annotations = { \"example.org/a\" = \"{agnet}\" }\n",
+		"agent key":  minimal + "\n[agents.foreman]\npod_annotations = { \"bad key\" = \"x\" }\n",
+		"process":    minimal + "\n[agents.svc]\nprocess = true\npod_annotations = { \"example.org/a\" = \"x\" }\n",
+	} {
+		_, err := config.Parse([]byte(doc))
+		require.Error(t, err, name)
+	}
+}

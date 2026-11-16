@@ -82,6 +82,9 @@ type Agent struct {
 	// agent's sessions have, of RoomTools: the foreman's dispatch, wait and
 	// result, a worker's claim and done.
 	Tools []string `toml:"tools"`
+	// PodAnnotations are put on the pods of this agent's sessions, over
+	// those of [kube]'s by key.
+	PodAnnotations map[string]string `toml:"pod_annotations"`
 }
 
 // RoomTools are the tools of the room that an agent has only when the
@@ -90,6 +93,18 @@ var RoomTools = []string{"dispatch", "wait", "result", "claim", "done"}
 
 // AgentTools returns the tools of the room that the agent's sessions have.
 func (c Config) AgentTools(agent string) []string { return c.Agents[agent].Tools }
+
+// AgentPodAnnotations returns the pod annotations each agent's sessions get
+// of their own.
+func (c Config) AgentPodAnnotations() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for name, a := range c.Agents {
+		if len(a.PodAnnotations) > 0 {
+			out[name] = a.PodAnnotations
+		}
+	}
+	return out
+}
 
 // AgentSecrets returns the Secrets each agent's sessions get of their own.
 func (c Config) AgentSecrets() map[string][]kube.Secret {
@@ -209,6 +224,12 @@ func (c *Config) validate() error {
 		}
 		if a.Process && (a.AlwaysOn || len(a.Secrets) > 0) {
 			return fmt.Errorf("agents.%q is a process, which has no room and takes no Secret of its own", agent)
+		}
+		if a.Process && len(a.PodAnnotations) > 0 {
+			return fmt.Errorf("agents.%q is a process, which has no pod and takes no annotation of its own", agent)
+		}
+		if err := kube.ValidateAnnotations(a.PodAnnotations); err != nil {
+			return fmt.Errorf("agents.%s.pod_annotations: %w", agent, err)
 		}
 		for i, sec := range a.Secrets {
 			if err := sec.Validate(); err != nil {

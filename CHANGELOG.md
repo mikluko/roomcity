@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `[kube] pod_annotations` and `[agents.<name>] pod_annotations`: annotations put on the pods of the sessions (the agent's win by key). A value may name `{agent}` and `{session}`, which the Job's creation replaces, and a key must be one Kubernetes takes, or the configuration is refused at load. It is the way to give a session's pod what an operator reads off a pod's annotations, such as OpenTelemetry's `instrumentation.opentelemetry.io/inject-sdk` and `resource.opentelemetry.io/service.name`.
+
 ## [0.10.0] - 2026-11-16
 
 ### Added

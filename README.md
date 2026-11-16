@@ -52,6 +52,8 @@ None of that is written into the Job's spec, which whoever may read Jobs can rea
 The server makes a Secret for each session, named like its Job, which holds every one of those variables; the pod reads it with `envFrom`, the Job owns it, and deleting the Job, as stopping the session does, removes it.
 The Secrets of the namespace that `roomcity.toml` lists (`[kube] secrets`, `[agents.<name>] secrets`) are mounted as files, and a file's path may be handed to the pod as a variable (`path_env`, `env`); a credential that is not in gc's environment reaches a pod that way.
 
+A session's pod also gets the annotations of `[kube] pod_annotations` and of its agent's `[agents.<name>] pod_annotations`, the agent's winning by key, so that an operator in the cluster that reads a pod's annotations (OpenTelemetry's, say: `instrumentation.opentelemetry.io/inject-sdk`, `resource.opentelemetry.io/service.name`) sees them. A value may name `{agent}` and `{session}`, replaced when the Job is made; for that a value cannot hold a brace of its own, so an annotation whose value is JSON cannot be set this way. A key Kubernetes would refuse, a stray brace, and an annotation on an agent that is a `process` (it has no pod) are refused when the configuration is loaded.
+
 Who can read a session's Secret: whoever may read Secrets in the namespace, which the server's Role grants it to make (create, update and delete on `secrets`: it cannot read or list them).
 A server that lacks the right fails the start and says so; it does not fall back to a plain environment.
 So an API key put in `city.toml`'s `env` reaches the pod and is readable by the namespace's readers of Secrets, and not by its readers of Jobs.

@@ -49,7 +49,7 @@ func runServer(ctx context.Context, args []string, p process) int {
 	}
 	defer ls.Close()
 	log := slog.New(slog.NewTextHandler(p.Stderr, nil))
-	if err := serve.Run(ctx, serve.Options{Config: cfg, Listeners: ls, Jobs: kube.New(client, cfg.Kube, cfg.AgentSecrets()), Log: log}); err != nil {
+	if err := serve.Run(ctx, serve.Options{Config: cfg, Listeners: ls, Jobs: kube.New(client, cfg.Kube, cfg.AgentSecrets()).AgentAnnotations(cfg.AgentPodAnnotations()), Log: log}); err != nil {
 		return fail(err)
 	}
 	return exitOK

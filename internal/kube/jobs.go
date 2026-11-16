@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -125,6 +127,11 @@ type Config struct {
 	// belong on.
 	NodeSelector map[string]string `toml:"node_selector"`
 	Tolerations  []Toleration      `toml:"tolerations"`
+	// PodAnnotations are put on every session's pod; an agent's own, in its
+	// table of the configuration, win by key. A value may name {agent} and
+	// {session}, which are replaced by the session's agent and its name when
+	// the Job is made.
+	PodAnnotations map[string]string `toml:"pod_annotations"`
 	// CPURequest and MemoryRequest are what a pod asks for, such as "250m"
 	// and "512Mi"; "" asks for nothing.
 	CPURequest    string `toml:"cpu_request"`
@@ -133,6 +140,9 @@ type Config struct {
 
 // Validate reports the first thing wrong with the configuration.
 func (c Config) Validate() error {
+	if err := ValidateAnnotations(c.PodAnnotations); err != nil {
+		return fmt.Errorf("pod_annotations: %w", err)
+	}
 	for _, q := range []string{c.CPURequest, c.MemoryRequest} {
 		if q == "" {
 			continue
@@ -142,6 +152,48 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateAnnotations reports the first annotation that Kubernetes would
+// refuse by its key, or that names a placeholder other than {agent} and
+// {session}.
+func ValidateAnnotations(annotations map[string]string) error {
+	for _, key := range slices.Sorted(maps.Keys(annotations)) {
+		if errs := validation.IsQualifiedName(strings.ToLower(key)); len(errs) > 0 { // as Kubernetes checks an annotation's key
+			return fmt.Errorf("%q: %s", key, strings.Join(errs, "; "))
+		}
+		if rest := placeholders.Replace(annotations[key]); strings.ContainsAny(rest, "{}") {
+			return fmt.Errorf("%q: the value %q has a { or } that is no {agent} or {session}", key, annotations[key])
+		}
+	}
+	return nil
+}
+
+// placeholders blanks the two names an annotation's value may use, so that
+// what is left of braces is a mistake.
+var placeholders = strings.NewReplacer("{agent}", "", "{session}", "")
+
+// podAnnotations are those of cfg and then of the agent's table, with the
+// placeholders of the values replaced.
+func (j *Jobs) podAnnotations(spec operate.JobSpec) map[string]string {
+	out := map[string]string{}
+	fill := strings.NewReplacer("{agent}", spec.Agent, "{session}", spec.Session)
+	for _, from := range []map[string]string{j.cfg.PodAnnotations, j.annotations[spec.Agent]} {
+		for k, v := range from {
+			out[k] = fill.Replace(v)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// AgentAnnotations gives each agent's sessions pod annotations of their own, on
+// top of Config's; it returns j.
+func (j *Jobs) AgentAnnotations(annotations map[string]map[string]string) *Jobs {
+	j.annotations = annotations
+	return j
 }
 
 // defaultUser is the user of the image.
@@ -157,6 +209,8 @@ type Jobs struct {
 	client kubernetes.Interface
 	cfg    Config
 	agent  map[string][]Secret
+	// annotations are the pod annotations of each agent's own.
+	annotations map[string]map[string]string
 }
 
 var _ operate.Jobs = (*Jobs)(nil)
@@ -325,7 +379,7 @@ func (j *Jobs) job(spec operate.JobSpec) *batchv1.Job {
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &zero,
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: j.podAnnotations(spec)},
 				Spec: corev1.PodSpec{
 					RestartPolicy:                corev1.RestartPolicyNever,
 					AutomountServiceAccountToken: &noToken,

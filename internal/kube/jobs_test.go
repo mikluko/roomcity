@@ -488,3 +488,29 @@ func TestAJobThatCannotBeMadeLeavesNoSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, list.Items)
 }
+
+func TestAPodGetsTheAnnotationsOfTheConfigurationAndOfItsAgentWithTheirPlaceholdersFilled(t *testing.T) {
+	c := fake.NewSimpleClientset()
+	jobs := kube.New(c, kube.Config{Namespace: "sandbox", Image: "i", PodAnnotations: map[string]string{
+		"example.org/inject": "ns/name", "example.org/service": "city-{agent}", "example.org/session": "{session}",
+	}}, nil).AgentAnnotations(map[string]map[string]string{"foreman": {"example.org/service": "boss"}})
+
+	require.NoError(t, jobs.Create(context.Background(), operate.JobSpec{Session: "foreman-1", Agent: "foreman", WorkDir: "/w"}))
+	require.NoError(t, jobs.Create(context.Background(), operate.JobSpec{Session: "worker-1", Agent: "worker", WorkDir: "/w"}))
+
+	list, err := c.BatchV1().Jobs("sandbox").List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	got := map[string]map[string]string{}
+	for _, j := range list.Items {
+		got[j.Annotations["roomcity.sarak.sh/agent"]] = j.Spec.Template.Annotations
+	}
+	require.Equal(t, map[string]string{"example.org/inject": "ns/name", "example.org/service": "boss", "example.org/session": "foreman-1"}, got["foreman"])
+	require.Equal(t, map[string]string{"example.org/inject": "ns/name", "example.org/service": "city-worker", "example.org/session": "worker-1"}, got["worker"])
+}
+
+func TestAPodOfAConfigurationWithNoAnnotationsHasNone(t *testing.T) {
+	jobs, c := newJobs()
+	require.NoError(t, jobs.Create(context.Background(), operate.JobSpec{Session: "s", Agent: "worker", WorkDir: "/w"}))
+	list, _ := c.BatchV1().Jobs("sandbox").List(context.Background(), metav1.ListOptions{})
+	require.Empty(t, list.Items[0].Spec.Template.Annotations)
+}
