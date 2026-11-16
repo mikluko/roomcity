@@ -45,12 +45,22 @@ func (d *Driver) findOrCreate(ctx context.Context, spec chat.RoomSpec) (id.RoomI
 	return d.createRoom(ctx, spec)
 }
 
-// FindRoom implements chat.Driver.
-func (d *Driver) FindRoom(ctx context.Context, spec chat.RoomSpec) (chat.RoomID, error) {
+// OpenRooms implements chat.Driver. It reads each room of the space once.
+func (d *Driver) OpenRooms(ctx context.Context, space chat.RoomID) (map[string]chat.RoomID, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	room, err := d.find(ctx, spec)
-	return chat.RoomID(room), err
+	children, err := d.children(ctx, id.RoomID(space))
+	if err != nil {
+		return nil, err
+	}
+	rooms := map[string]chat.RoomID{}
+	for _, child := range children {
+		var content event.RoomNameEventContent
+		if err := d.as.BotClient().StateEvent(ctx, child, event.StateRoomName, "", &content); err == nil && content.Name != "" {
+			rooms[content.Name] = chat.RoomID(child)
+		}
+	}
+	return rooms, nil
 }
 
 func (d *Driver) find(ctx context.Context, spec chat.RoomSpec) (id.RoomID, error) {

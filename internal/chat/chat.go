@@ -98,9 +98,8 @@ type Driver interface {
 	// time. It invites every user of the spec's Invite who is not in the
 	// room yet, and leaves the others as they are.
 	EnsureRoom(ctx context.Context, spec RoomSpec) (RoomID, error)
-	// FindRoom returns the room of the spec as EnsureRoom would find it, or
-	// "" when there is none: it makes nothing.
-	FindRoom(ctx context.Context, spec RoomSpec) (RoomID, error)
+	// OpenRooms returns the open rooms that are in the space now, by title.
+	OpenRooms(ctx context.Context, space RoomID) (map[string]RoomID, error)
 	// Retire takes a room out of its space and the speaker out of the room.
 	// The room stays for those who are in it.
 	Retire(ctx context.Context, room RoomID, speaker string) error

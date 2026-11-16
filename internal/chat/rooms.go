@@ -43,8 +43,35 @@ func (s *Service) makeBase(ctx context.Context) {
 	if !ok {
 		return
 	}
-	s.space, s.journal = space, journal
+	known, ok := s.readKnown(ctx, space)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.space, s.journal, s.known = space, journal, known
+	s.mu.Unlock()
 	close(s.ready)
+}
+
+// readKnown reads the open rooms of the space, once, and tries again after a
+// pause while the chat system fails.
+func (s *Service) readKnown(ctx context.Context, space RoomID) (map[string]RoomID, bool) {
+	pause := s.RetryEvery
+	if pause == 0 {
+		pause = 5 * time.Second
+	}
+	for {
+		known, err := s.Driver.OpenRooms(ctx, space)
+		if err == nil {
+			return known, true
+		}
+		s.Log.Error("reading the rooms of the space, trying again", "err", err)
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return nil, false
+		}
+	}
 }
 
 // journalNotice adds a line to the journal.
@@ -88,14 +115,16 @@ func (s *Service) attachTask(ctx context.Context, wg *sync.WaitGroup, info sessi
 
 func (s *Service) startTask(ctx context.Context, wg *sync.WaitGroup, info session.Info) {
 	spec := s.taskSpec(info)
-	existing, err := s.Driver.FindRoom(ctx, spec)
-	if err != nil {
-		s.Log.Warn("looking for a task's room", "session", info.Name, "err", err)
-	}
+	s.mu.Lock()
+	existing := s.known[spec.Title]
+	s.mu.Unlock()
 	room, ok := s.ensure(ctx, spec)
 	if !ok {
 		return
 	}
+	s.mu.Lock()
+	s.known[spec.Title] = room
+	s.mu.Unlock()
 	taskCtx, cancel := context.WithCancel(ctx)
 	task := &taskRoom{
 		cancel: cancel,
@@ -144,17 +173,18 @@ func (s *Service) endTask(ctx context.Context, info session.Info, task *taskRoom
 // was away out of the space, if it is still there, and writes the journal's
 // line for the end.
 func (s *Service) settleEnded(ctx context.Context, info session.Info) {
-	room, err := s.Driver.FindRoom(ctx, s.taskSpec(info))
-	if err != nil {
-		s.Log.Error("looking for the room of a task that ended", "session", info.Name, "err", err)
-		return
-	}
+	s.mu.Lock()
+	room := s.known[s.taskSpec(info).Title]
+	s.mu.Unlock()
 	if room != "" {
 		s.retireTask(ctx, info, room)
 	}
 }
 
 func (s *Service) retireTask(ctx context.Context, info session.Info, room RoomID) {
+	s.mu.Lock()
+	delete(s.known, s.taskSpec(info).Title)
+	s.mu.Unlock()
 	if err := s.Driver.Retire(ctx, room, info.Agent); err != nil {
 		s.Log.Error("taking a task's room out of the space", "session", info.Name, "err", err)
 	}

@@ -140,6 +140,22 @@ func TestServiceTakesTheRoomOfATaskThatEndedWhileTheServerWasAwayOutOfTheSpace(t
 	}
 }
 
+func TestServiceReadsTheRoomsOfTheSpaceOncePerStart(t *testing.T) {
+	sessions := &chattest.Sessions{}
+	sessions.Add(alwaysOn("host", session.Running))
+	driver := newFakeDriver()
+	for _, name := range []string{"s-a", "s-b", "s-c"} {
+		sessions.Add(task(name, session.Ended))
+		driver.keep("worker " + name)
+	}
+	runServiceWith(t, sessions, driver)
+
+	require.Eventually(t, func() bool { return len(driver.retirements()) == 3 }, 5*time.Second, 10*time.Millisecond)
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	require.Equal(t, 1, driver.opened, "one read of the space settles every ended task")
+}
+
 func TestServiceWritesAStartedLineOnlyWhenItMadeTheRoom(t *testing.T) {
 	sessions := &chattest.Sessions{}
 	sessions.Add(alwaysOn("host", session.Running))

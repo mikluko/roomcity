@@ -42,6 +42,7 @@ type fakeDriver struct {
 	handler chan func(chat.Incoming)
 
 	retired   []retirement
+	opened    int                    // calls of OpenRooms
 	open      map[string]chat.RoomID // the open rooms that are in the space, by title
 	reactions []reaction
 	typings   []bool
@@ -72,10 +73,15 @@ func (d *fakeDriver) EnsureRoom(_ context.Context, spec chat.RoomSpec) (chat.Roo
 	return chat.RoomID("!" + spec.Key), nil
 }
 
-func (d *fakeDriver) FindRoom(_ context.Context, spec chat.RoomSpec) (chat.RoomID, error) {
+func (d *fakeDriver) OpenRooms(context.Context, chat.RoomID) (map[string]chat.RoomID, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.open[spec.Title], nil
+	d.opened++
+	out := map[string]chat.RoomID{}
+	for title, room := range d.open {
+		out[title] = room
+	}
+	return out, nil
 }
 
 // keep puts an open room in the space that the city had before this run.

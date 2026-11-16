@@ -35,6 +35,7 @@ type Service struct {
 	space, journal RoomID
 	ready          chan struct{} // closed once the space and the journal are made
 	tasks          map[string]*taskRoom
+	known          map[string]RoomID // the open rooms in the space, by title; read once, kept up to date
 
 	mu     sync.Mutex
 	rooms  map[string]RoomID        // by agent
