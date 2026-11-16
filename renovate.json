@@ -1,12 +1,61 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabledManagers": ["gomod", "custom.regex"],
+  "postUpdateOptions": ["gomodTidy"],
+  "platformAutomerge": false,
+  "automergeStrategy": "squash",
+  "description": "A pull request of Renovate's merges itself, on a run of Renovate that finds every check green, unless a rule below says otherwise; platformAutomerge is off because Renovate promises that only of its own automerge. No merge cuts a release: the note each pull request carries goes under [Unreleased] and names no version, and the release workflow acts only on a version with no tag. constraints.golang is an exact version so that Renovate installs the Go that postUpgradeTasks need without looking its releases up on GitHub, which takes a token Renovate here does not have; it is go.mod's go directive. The note is in single quotes and has no backtick, which a shell would run.",
+  "constraints": { "golang": "1.27.4" },
+  "automerge": true,
+  "postUpgradeTasks": {
+    "commands": [
+      "go tool changelog append -section=Changed -note 'Updated: {{#each upgrades}}{{{depName}}} {{#if newDigestShort}}{{{newDigestShort}}}{{else}}{{{newValue}}}{{/if}}{{#unless @last}}, {{/unless}}{{/each}}.'"
+    ],
+    "fileFilters": ["CHANGELOG.md"],
+    "executionMode": "branch",
+    "installTools": { "golang": {} }
+  },
   "packageRules": [
+    {
+      "description": "A major version is never merged by Renovate, whatever the checks say: the rules below keep out the ones that are no update, and what is left is read",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "gc's pin is read, not merged: the checks do not run a city, and what changed upstream is read against the runtime protocol, the session's environment and the commands the work tools call (the owner, 2026-11-16)",
+      "matchDepNames": ["https://github.com/gastownhall/gascity"],
+      "automerge": false
+    },
+    {
+      "description": "The Go directive is the Dockerfile's Go as well: they move together, by hand",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "enabled": false
+    },
+    {
+      "description": "The changelog tool that postUpgradeTasks runs is a tool of go.mod. Its move is a pull request of its own with no note, and merges itself on green checks like the others, though no check runs the tool.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["sarak.sh/mikluko/changelog/v2"],
+      "postUpgradeTasks": { "commands": [] }
+    },
     {
       "description": "connect-go v2 is a new module path, connectrpc.com/connect/v2, and the move to it is work of its own; a bare require of the new major, which nothing imports, is no update",
       "matchManagers": ["gomod"],
       "matchPackageNames": ["connectrpc.com/connect"],
       "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "goldmark v2 is a new module path, github.com/yuin/goldmark/v2, with a new design (generics, a parser and a renderer apart, a different AST) that its own README calls early: v1 is kept up with fixes for a major version back. The page of transcripts renders agents' Markdown with raw HTML dropped and a link to a script removed, and the example's test walks headings with the parser: the move is a rewrite of both and a check of what the page escapes, work of its own; a bare require of the new major, which nothing imports, is no update",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/yuin/goldmark"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "acp-go 0.4.0 does not build with claudeacp 0.6.0 (Diff.OldText is a pointer, Nullable), and the library is to be replaced (spec-bb1.38): no updates of it until then; this rule goes with that ticket",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/afrase/acp-go"],
       "enabled": false
     }
   ],
