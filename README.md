@@ -83,6 +83,17 @@ tools = ["dispatch", "wait", "result"]
 tools = ["claim", "done"]
 ```
 
+A worker that cannot finish its task is ended by the server, which closes the task as `abandoned` (gc's `gc.work_outcome`) with the reason in its notes: the foreman's `wait` then fires and `result` says the task failed and why. Two keys of the agent's table say when, `task_timeout` (a duration such as `"30m"`; none by default) and `failed_turns` (how many turns in a row that end in an error from the agent's model, 3 by default for an agent with `claim`, a negative number for none):
+
+```toml
+[agents.worker]
+tools = ["claim", "done"]
+task_timeout = "30m"
+failed_turns = 3
+```
+
+A task a worker's `done` closed stays `no-op` (gc's outcome for work that ships no commit) and is never overwritten by the server's ending of the session, which asks gc to end it again and does nothing more.
+
 The server puts the agent's list in the pod as `ROOMCITY_ROOM_TOOLS` (commas), the host offers exactly those, and the server refuses a call of a tool the agent does not have, whatever the host offered, in words the agent reads. A name that is not one of the five is refused when the configuration is loaded.
 
 The host answers the agent's request for leave to use the tools the session has itself, allowing the call once, and the room shows the owner nothing to answer (the request is recorded with `_meta.roomcity.answeredBy` = `"host"`). That holds for `dispatch` too, by the owner's decision, and it is a plain one: an agent with `dispatch` starts a worker with any task and nobody is asked, and a worker asks nobody for what it runs; the room shows each handing over.

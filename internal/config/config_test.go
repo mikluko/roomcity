@@ -235,3 +235,34 @@ pod_annotations = { "example.org/service" = "{session}" }
 		require.Error(t, err, name)
 	}
 }
+
+func TestATaskSessionIsEndedAfterItsTimeoutAndItsFailedTurns(t *testing.T) {
+	c, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", `
+[agents.worker]
+tools = ["claim", "done"]
+task_timeout = "30m"
+
+[agents.quick]
+tools = ["claim"]
+failed_turns = 5
+
+[agents.patient]
+tools = ["claim"]
+failed_turns = -1
+
+[agents.foreman]
+tools = ["dispatch"]
+
+[kube]`, 1)))
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Minute, c.AgentTaskTimeout("worker"))
+	require.Zero(t, c.AgentTaskTimeout("foreman"))
+	require.Equal(t, config.DefaultFailedTurns, c.AgentFailedTurns("worker"), "an agent that claims is given the default")
+	require.Equal(t, 5, c.AgentFailedTurns("quick"))
+	require.Zero(t, c.AgentFailedTurns("patient"))
+	require.Zero(t, c.AgentFailedTurns("foreman"))
+	require.Zero(t, c.AgentFailedTurns("nobody"))
+
+	_, err = config.Parse([]byte(strings.Replace(minimal, "[kube]", "[agents.worker]\ntask_timeout = \"-1m\"\n\n[kube]", 1)))
+	require.ErrorContains(t, err, "agents.worker.task_timeout is negative")
+}

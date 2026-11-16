@@ -33,6 +33,9 @@ type Host struct {
 	// every one is refused.
 	Work  Work
 	Tools func(agent string) []string
+	// Observe, when set, is given the frames of a session as they are
+	// reported, once they are stored.
+	Observe func(ctx context.Context, session string, frames []session.HostFrame)
 	// MaxFile is the most bytes of a file that Send takes; zero is DefaultMaxFile.
 	MaxFile int64
 	Log     *slog.Logger
@@ -164,6 +167,9 @@ func (h *Host) Report(ctx context.Context, req *connect.Request[roomcityv1.Repor
 	last, err := h.Registry.Report(ctx, req.Msg.Session, frames)
 	if err != nil {
 		return nil, fail(err)
+	}
+	if h.Observe != nil {
+		h.Observe(ctx, req.Msg.Session, frames)
 	}
 	return connect.NewResponse(&roomcityv1.ReportResponse{LastSeq: last}), nil
 }

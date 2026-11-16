@@ -33,9 +33,9 @@ func (h *handing) Wait(_ context.Context, s, id string) error {
 	return h.err
 }
 
-func (h *handing) Result(_ context.Context, s, id string) (bool, string, string, error) {
+func (h *handing) Result(_ context.Context, s, id string) (bool, string, string, string, error) {
 	h.calls = append(h.calls, "result "+s+" "+id)
-	return true, "closed", "nine", h.err
+	return true, "closed", "nine", "no-op", h.err
 }
 
 func (h *handing) Claim(_ context.Context, s string) (string, string, bool, error) {
@@ -93,6 +93,7 @@ func TestTheForemanDispatchesAndWaitsAndAWorkerClaimsAndIsDone(t *testing.T) {
 	require.True(t, r.Msg.Closed)
 	require.Equal(t, "closed", r.Msg.Status)
 	require.Equal(t, "nine", r.Msg.Result)
+	require.Equal(t, "no-op", r.Msg.Outcome)
 
 	c, err := f.worker.Claim(ctx, connect.NewRequest(&roomcityv1.ClaimRequest{Session: "worker-1"}))
 	require.NoError(t, err)

@@ -171,6 +171,11 @@ message ResultResponse {
   // The task's state as gc's store names it, such as open or closed.
   string status = 2;
   string result = 3;
+  // How the task ended, as gc's typed work record has it (gc.work_outcome):
+  // no-op for a worker's own done, abandoned for a task the server ended
+  // because its session could not finish it, "" before the close or when gc
+  // recorded none.
+  string outcome = 4;
 }
 
 // Handling is what became of a prompt in the host.

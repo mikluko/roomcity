@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -21,7 +23,7 @@ case "$1" in
 sling) cat > "$LOG.stdin"; echo '{"schema_version":"1","ok":true,"success":true,"target":"worker","bead_id":"bd-7"}' ;;
 hook) echo "$HOOK" ;;
 bd) case "$2" in
-    show) echo "[{\"id\":\"bd-7\",\"title\":\"count the words\",\"description\":\"in a.txt\",\"status\":\"${STATUS:-in_progress}\",\"notes\":\"nine words\"}]" ;;
+    show) echo "[{\"id\":\"bd-7\",\"title\":\"count the words\",\"description\":\"in a.txt\",\"status\":\"${STATUS:-in_progress}\",\"notes\":\"nine words\",\"metadata\":{\"gc.work_outcome\":\"${OUTCOME:-no-op}\",\"n\":5,\"flag\":true}}]" ;;
     close) [ -n "$CLOSE_FAILS" ] && { echo "bd: no such bead" >&2; exit 1; } ;;
     esac ;;
 esac
@@ -89,7 +91,7 @@ func TestDoneNotesClosesAndDrainsInThatOrderAndForgetsTheTask(t *testing.T) {
 	w, m, log := work(t)
 	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
 	require.NoError(t, w.Done(context.Background(), "worker-1", "--nine words"))
-	require.Equal(t, []string{"bd update bd-7 --notes=--nine words", "bd close bd-7", "runtime drain-ack"}, ran(t, log))
+	require.Equal(t, []string{"bd update bd-7 --notes=--nine words --set-metadata gc.work_outcome=no-op", "bd close bd-7 --reason=Done: --nine words", "runtime drain-ack"}, ran(t, log))
 	require.Empty(t, m["worker-1/"+gcwork.ClaimedMark])
 }
 
@@ -121,7 +123,7 @@ func TestATaskIdThatIsNoBeadsIdNeverReachesGc(t *testing.T) {
 	w, _, log := work(t)
 	for _, id := range []string{"", "--help", "-x", "bd-7,bd-8", "bd-7 --json", "bd 7", "../bd-7", "BD-7", "bd-7\n--flag"} {
 		require.ErrorContains(t, w.Wait(context.Background(), "foreman", id), "is not the id of a task", id)
-		_, _, _, err := w.Result(context.Background(), "foreman", id)
+		_, _, _, _, err := w.Result(context.Background(), "foreman", id)
 		require.ErrorContains(t, err, "is not the id of a task", id)
 	}
 	_, statErr := os.Stat(log)
@@ -133,16 +135,115 @@ func TestATaskIdThatIsNoBeadsIdNeverReachesGc(t *testing.T) {
 
 func TestResultIsTheNotesOfAClosedTaskAndNothingBeforeThat(t *testing.T) {
 	w, _, _ := work(t, "STATUS=closed")
-	closed, status, result, err := w.Result(context.Background(), "foreman", "bd-7")
+	closed, status, result, outcome, err := w.Result(context.Background(), "foreman", "bd-7")
 	require.NoError(t, err)
 	require.True(t, closed)
 	require.Equal(t, "closed", status)
 	require.Equal(t, "nine words", result)
+	require.Equal(t, "no-op", outcome)
 
 	w, _, _ = work(t)
-	closed, status, result, err = w.Result(context.Background(), "foreman", "bd-7")
+	closed, status, result, outcome, err = w.Result(context.Background(), "foreman", "bd-7")
 	require.NoError(t, err)
 	require.False(t, closed)
 	require.Equal(t, "in_progress", status)
 	require.Empty(t, result, "not done yet is no result")
+	require.Empty(t, outcome)
+}
+
+func TestFailClosesTheClaimedTaskAsAbandonedAndEndsTheSession(t *testing.T) {
+	w, m, log := work(t)
+	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
+	require.NoError(t, w.Fail(context.Background(), "worker-1", "ended without a result: timed out after 30m0s"))
+	require.Equal(t, []string{
+		"bd update bd-7 --notes=ended without a result: timed out after 30m0s --set-metadata gc.work_outcome=abandoned",
+		"bd close bd-7 --reason=ended without a result: timed out after 30m0s",
+		"runtime drain-ack",
+	}, ran(t, log))
+	require.Empty(t, m["worker-1/"+gcwork.ClaimedMark])
+}
+
+func TestFailClaimsTheTaskASessionNeverClaimedAndAbandonsIt(t *testing.T) {
+	w, _, log := work(t, `HOOK={"action":"work","bead_id":"bd-7"}`)
+	require.NoError(t, w.Fail(context.Background(), "worker-1", "ended without a result: its model failed 3 turns in a row"))
+	got := ran(t, log)
+	require.Equal(t, "hook --claim --drain-ack --json", got[0])
+	require.Equal(t, "bd show bd-7 --json", got[1])
+	require.Contains(t, got[2], "bd update bd-7 --notes=ended without a result")
+	require.Contains(t, got[2], "gc.work_outcome=abandoned")
+	require.Equal(t, "runtime drain-ack", got[len(got)-1])
+}
+
+func TestFailLeavesASessionWithNoTaskToGcWhichHasDrainedIt(t *testing.T) {
+	w, _, log := work(t, `HOOK={"action":"drain"}`)
+	require.NoError(t, w.Fail(context.Background(), "worker-1", "x"))
+	require.Equal(t, []string{"hook --claim --drain-ack --json"}, ran(t, log))
+}
+
+func TestAFailAfterTheWorkersOwnDoneChangesNothingAndANewClaimTakesNoTask(t *testing.T) {
+	w, m, log := work(t, `HOOK={"action":"work","bead_id":"bd-8"}`)
+	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
+	require.NoError(t, w.Done(context.Background(), "worker-1", "nine"))
+	before := len(ran(t, log))
+
+	require.NoError(t, w.Fail(context.Background(), "worker-1", "ended without a result: timed out"))
+	got := ran(t, log)[before:]
+	require.Equal(t, []string{"runtime drain-ack"}, got, "the end is asked again, the task is not touched")
+	_, _, found, err := w.Claim(context.Background(), "worker-1")
+	require.ErrorContains(t, err, "your task is over (no-op)")
+	require.False(t, found)
+	require.NotContains(t, ran(t, log), "hook --claim --drain-ack --json", "the next worker's task is not taken")
+	err = w.Done(context.Background(), "worker-1", "again")
+	require.ErrorContains(t, err, "already over (no-op)")
+}
+
+func TestADoneAfterAFailIsToldTheTaskIsOver(t *testing.T) {
+	w, m, _ := work(t)
+	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
+	require.NoError(t, w.Fail(context.Background(), "worker-1", "ended without a result: timed out"))
+	err := w.Done(context.Background(), "worker-1", "nine")
+	require.ErrorContains(t, err, "already over (abandoned)")
+}
+
+func TestTheActsOnOneSessionsTaskDoNotRunTogether(t *testing.T) {
+	w, m, log := work(t)
+	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
+	var doneErr, failErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); doneErr = w.Done(context.Background(), "worker-1", "nine") }()
+	go func() { defer wg.Done(); failErr = w.Fail(context.Background(), "worker-1", "timed out") }()
+	wg.Wait()
+	require.Equal(t, 1, strings.Count(strings.Join(ran(t, log), "\n"), "bd close bd-7"), "the task is closed once")
+	require.NoError(t, failErr, "a fail on a task that is over is not an error")
+	if doneErr != nil {
+		require.ErrorContains(t, doneErr, "already over (abandoned)", "the fail came first")
+	}
+}
+
+func TestAReasonIsCutOnACharacterAndNeverLeavesAnInvalidOne(t *testing.T) {
+	w, m, log := work(t)
+	m["worker-1/"+gcwork.ClaimedMark] = "bd-7"
+	long := strings.Repeat("я", 300)
+	require.NoError(t, w.Done(context.Background(), "worker-1", long))
+	got := ran(t, log)
+	require.Equal(t, "bd close bd-7 --reason=Done: "+strings.Repeat("я", 200)+"...", got[1])
+	for _, line := range got {
+		require.True(t, utf8.ValidString(line), line)
+	}
+
+	// 199 ASCII letters and then a two-byte one: a cut at byte 200 is inside it.
+	m["worker-2/"+gcwork.ClaimedMark] = "bd-8"
+	require.NoError(t, w.Done(context.Background(), "worker-2", strings.Repeat("a", 199)+"я"+"b"))
+	for _, line := range ran(t, log) {
+		require.True(t, utf8.ValidString(line), line)
+	}
+
+	// What the server writes as a reason is valid too, whatever the model's
+	// error held.
+	m["worker-3/"+gcwork.ClaimedMark] = "bd-9"
+	require.NoError(t, w.Fail(context.Background(), "worker-3", "ended without a result: the last with: \xd1"+strings.Repeat("я", 300)))
+	for _, line := range ran(t, log) {
+		require.True(t, utf8.ValidString(line), line)
+	}
 }

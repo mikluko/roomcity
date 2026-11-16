@@ -20,7 +20,7 @@ type Work interface {
 	Wait(ctx context.Context, session, id string) error
 	// Result says whether the task is closed, its state, and what was stored
 	// in it when it was.
-	Result(ctx context.Context, session, id string) (closed bool, status, result string, err error)
+	Result(ctx context.Context, session, id string) (closed bool, status, result, outcome string, err error)
 	// Claim takes the task the session was started for; found is false when
 	// there is none.
 	Claim(ctx context.Context, session string) (id, text string, found bool, err error)
@@ -91,11 +91,11 @@ func (h *Host) Result(ctx context.Context, req *connect.Request[roomcityv1.Resul
 	if m.TaskId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no task given"))
 	}
-	closed, status, result, err := h.Work.Result(ctx, m.Session, m.TaskId)
+	closed, status, result, outcome, err := h.Work.Result(ctx, m.Session, m.TaskId)
 	if err != nil {
 		return nil, workError(err)
 	}
-	return connect.NewResponse(&roomcityv1.ResultResponse{Closed: closed, Status: status, Result: result}), nil
+	return connect.NewResponse(&roomcityv1.ResultResponse{Closed: closed, Status: status, Result: result, Outcome: outcome}), nil
 }
 
 func (h *Host) Claim(ctx context.Context, req *connect.Request[roomcityv1.ClaimRequest]) (*connect.Response[roomcityv1.ClaimResponse], error) {

@@ -27,6 +27,7 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/procs"
 	"sarak.sh/mikluko/roomcity/internal/server"
 	"sarak.sh/mikluko/roomcity/internal/session"
+	"sarak.sh/mikluko/roomcity/internal/taskwatch"
 	"sarak.sh/mikluko/roomcity/internal/transcripts"
 )
 
@@ -173,9 +174,16 @@ func Run(ctx context.Context, o Options) error {
 		Log:        log,
 	})
 	work := &gcwork.Work{Gc: gc, Marks: reg}
+	watch := &taskwatch.Watch{
+		Sessions:    reg,
+		Ender:       work,
+		Timeout:     cfg.AgentTaskTimeout,
+		FailedTurns: cfg.AgentFailedTurns,
+		Log:         log,
+	}
 
 	s := server.New()
-	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: files, MaxFile: maxFile, Work: work, Tools: cfg.AgentTools, Log: log}))
+	s.Handle(roomcityv1connect.NewHostServiceHandler(&server.Host{Registry: reg, Files: files, MaxFile: maxFile, Work: work, Tools: cfg.AgentTools, Observe: watch.Observe, Log: log}))
 	s.Handle(roomcityv1connect.NewGcServiceHandler(gc))
 	s.HandleRuntime(roomcityv1connect.NewRuntimeServiceHandler(operate.New(reg, o.Jobs, operate.Config{
 		ServerURL:    cfg.Server.URL,
@@ -197,6 +205,10 @@ func Run(ctx context.Context, o Options) error {
 	if side != nil {
 		g.Go(func() error { return side.Service.Run(ctx) })
 	}
+	g.Go(func() error {
+		watch.Run(ctx)
+		return nil
+	})
 	g.Go(func() error {
 		purgeTranscripts(ctx, reg, cfg.Server.TranscriptTerm.Duration(), cfg.Server.PurgeEvery.Duration(), log)
 		return nil

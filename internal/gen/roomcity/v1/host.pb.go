@@ -1184,8 +1184,13 @@ type ResultResponse struct {
 	// Whether the task is closed; the result is only then what Done stored.
 	Closed bool `protobuf:"varint,1,opt,name=closed,proto3" json:"closed,omitempty"`
 	// The task's state as gc's store names it, such as open or closed.
-	Status        string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Result        string `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Result string `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	// How the task ended, as gc's typed work record has it (gc.work_outcome):
+	// no-op for a worker's own done, abandoned for a task the server ended
+	// because its session could not finish it, "" before the close or when gc
+	// recorded none.
+	Outcome       string `protobuf:"bytes,4,opt,name=outcome,proto3" json:"outcome,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1237,6 +1242,13 @@ func (x *ResultResponse) GetStatus() string {
 func (x *ResultResponse) GetResult() string {
 	if x != nil {
 		return x.Result
+	}
+	return ""
+}
+
+func (x *ResultResponse) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
 	}
 	return ""
 }
@@ -1722,11 +1734,12 @@ const file_roomcity_v1_host_proto_rawDesc = "" +
 	"\fDoneResponse\"B\n" +
 	"\rResultRequest\x12\x18\n" +
 	"\asession\x18\x01 \x01(\tR\asession\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\tR\x06taskId\"X\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"r\n" +
 	"\x0eResultResponse\x12\x16\n" +
 	"\x06closed\x18\x01 \x01(\bR\x06closed\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
-	"\x06result\x18\x03 \x01(\tR\x06result\"\x06\n" +
+	"\x06result\x18\x03 \x01(\tR\x06result\x12\x18\n" +
+	"\aoutcome\x18\x04 \x01(\tR\aoutcome\"\x06\n" +
 	"\x04Stop\"U\n" +
 	"\rReportRequest\x12\x18\n" +
 	"\asession\x18\x01 \x01(\tR\asession\x12*\n" +

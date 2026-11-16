@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `[kube] pod_annotations` and `[agents.<name>] pod_annotations`: annotations put on the pods of the sessions (the agent's win by key). A value may name `{agent}` and `{session}`, which the Job's creation replaces, and a key must be one Kubernetes takes, or the configuration is refused at load. It is the way to give a session's pod what an operator reads off a pod's annotations, such as OpenTelemetry's `instrumentation.opentelemetry.io/inject-sdk` and `resource.opentelemetry.io/service.name`.
+- A task session that cannot finish its task is ended by the server, which closes the task as `abandoned` (`gc.work_outcome`) with the reason in its notes and has gc end the session, so that the foreman's `wait` fires and `result` tells the task failed instead of leaving it open for ever: after `[agents.<name>] task_timeout`, and after `failed_turns` turns in a row (3 for an agent with the tool `claim`) that end in an error from the agent's model. `done` records the task as `no-op`, the outcome gc has for work that ships no commit, and `result` gives the outcome beside the notes (`HostService.Result`'s `outcome`).
 
 ### Changed
 

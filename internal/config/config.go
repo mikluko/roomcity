@@ -85,6 +85,37 @@ type Agent struct {
 	// PodAnnotations are put on the pods of this agent's sessions, over
 	// those of [kube]'s by key.
 	PodAnnotations map[string]string `toml:"pod_annotations"`
+	// TaskTimeout is how long a task session of this agent may run before the
+	// server ends it as a task that came to no result; 0 is for as long as
+	// it takes.
+	TaskTimeout Duration `toml:"task_timeout"`
+	// FailedTurns is how many turns in a row that end in an error from the
+	// agent end its task session the same way. 0 is DefaultFailedTurns for an
+	// agent that has the tool claim and none for any other; a negative number
+	// is none.
+	FailedTurns int `toml:"failed_turns"`
+}
+
+// DefaultFailedTurns is the FailedTurns of an agent that has the tool claim
+// and says nothing else.
+const DefaultFailedTurns = 3
+
+// AgentTaskTimeout returns how long the agent's task sessions may run.
+func (c Config) AgentTaskTimeout(agent string) time.Duration {
+	return c.Agents[agent].TaskTimeout.Duration()
+}
+
+// AgentFailedTurns returns how many failed turns in a row end the agent's task
+// session, 0 for never.
+func (c Config) AgentFailedTurns(agent string) int {
+	a := c.Agents[agent]
+	switch {
+	case a.FailedTurns > 0:
+		return a.FailedTurns
+	case a.FailedTurns == 0 && slices.Contains(a.Tools, "claim"):
+		return DefaultFailedTurns
+	}
+	return 0
 }
 
 // RoomTools are the tools of the room that an agent has only when the
@@ -196,6 +227,9 @@ func (c *Config) validate() error {
 		return errors.New("a timeout or a term is negative")
 	}
 	for name, a := range c.Agents {
+		if a.TaskTimeout < 0 {
+			return fmt.Errorf("agents.%s.task_timeout is negative", name)
+		}
 		for _, tool := range a.Tools {
 			if !slices.Contains(RoomTools, tool) {
 				return fmt.Errorf("agents.%s.tools: %q is not a tool of the room; the tools are %s", name, tool, strings.Join(RoomTools, ", "))
