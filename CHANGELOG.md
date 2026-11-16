@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `examples/minimal`: the Role gives the server only the rights its calls use (no watch, no right to make or delete a pod), and the StatefulSet has `fsGroup: 1000`, which a block volume needs for the pod's user to write it; a test holds its pack range to admit the newest release, as it does the image.
+- `examples/minimal`'s README says more of what must be there before it (a homeserver in the cluster and how Tuwunel reads a registration, the pod's egress, a Dolt server that takes a connection without TLS), names each value to replace once with every place it stands in, says what a registration token may be and how to make one, and says how to look at the pod once it is applied. The README's note that no session had run end to end is gone.
 
 ### Fixed
 

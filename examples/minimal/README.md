@@ -44,36 +44,53 @@ controller reach the proxy.
 
 - A Kubernetes cluster with an ingress controller, and a node on which a
   volume of the class you choose can be written by user 1000.
-- A Matrix homeserver that takes an application service registration and
-  restarts to read it (Tuwunel does; its registrations are read at startup), and
-  a user of yours on it, the owner.
-- A Dolt SQL server the pod can reach, with a user for the city and an empty
-  database of its own that the user has all rights on.
+- A Matrix homeserver in the same cluster, with a user of yours on it, the
+  owner: the registration's `url` and `k8s/network-policy.yaml` name cluster
+  addresses, the homeserver's namespace and its pods' labels. It must take an
+  application service registration. Only Tuwunel 2.0.0 is tested. Tuwunel reads
+  the registration files of the directory that its option `appservice_dir`
+  names, at startup only, so it is restarted to read one.
+- A Dolt SQL server the pod can reach and that takes a connection without TLS
+  (`k8s/files/start.sh` runs `dolt --no-tls`), with a user for the city and an
+  empty database of its own that the user has all rights on.
 - An OIDC provider for the transcripts page, with a client whose callback is
   `https://city.example.org/oauth2/callback`, and a group `admin` that the
   owner is in.
 - A Git server with the city's repository and a user that can read it.
 - A Claude Code token (for `host` and `worker`) and an API key for Kimi's coding
   API (for `guest`).
+- Egress from the pod: to the Git server, to `github.com` and `sarak.sh`
+  (`gc import install` fetches the packs that `city/pack.toml` names from the
+  two), to the Dolt server and the homeserver, to Claude Code's API and to
+  Kimi's (`https://api.kimi.com/coding`, in `city/city.toml`). The nodes pull
+  the image from `sarak.sh` and the proxy's from `quay.io`.
 
 ## What to replace
 
-| Placeholder | Where | Replace with |
+Each value is one row, with every place it stands in. Replace the longer names
+first: `example.org` ends `city.example.org`, `id.example.org`,
+`git.example.org` and `noreply.example.org`, so it comes last.
+
+| Value | Stands in | Replace with |
 |---|---|---|
-| `example.org` | `k8s/files/roomcity.toml`, `registration/`, `k8s/statefulset.yaml` | the homeserver's server name and your domain |
-| `city.example.org` | `k8s/ui.ingress.yaml`, `k8s/statefulset.yaml`, `k8s/files/roomcity.toml` | the address of the transcripts page |
-| `id.example.org` | `k8s/statefulset.yaml` | the OIDC provider's issuer |
-| `00000000-0000-0000-0000-000000000000` | `k8s/statefulset.yaml` | the client ID of the OIDC client |
-| `https://git.example.org/example/city.git` | `k8s/statefulset.yaml` | the city's repository |
-| `git.example.org`, `noreply.example.org` | `k8s/files/start.sh` | the Git server, and the domain of the identity the city commits as |
-| `@owner:example.org`, `@owner-app:example.org` | `k8s/files/roomcity.toml` | the Matrix ids that hold the owner's role; remove the second if you have none |
-| `homeserver.matrix.svc.cluster.local` | `k8s/files/roomcity.toml` | the homeserver's address in the cluster |
-| `dolt.dolt.svc.cluster.local`, `city`, `sandbox` | `k8s/statefulset.yaml`, `city/city.toml` | the Dolt server, the city's user and database on it (the host in `city/city.toml` is the same as `CITY_DOLT_HOST`) |
-| `roomcity-example` | `k8s/`, `registration/` | the namespace |
+| `https://git.example.org/example/city.git` | `k8s/statefulset.yaml` (`CITY_REPOSITORY`) | the city's repository |
+| `city.example.org` | `k8s/ui.ingress.yaml` (twice), `k8s/statefulset.yaml` (`--redirect-url`), `k8s/files/roomcity.toml` (`[chat] transcripts`) | the address of the transcripts page |
+| `id.example.org` | `k8s/statefulset.yaml` (`--oidc-issuer-url`) | the OIDC provider's issuer |
+| `00000000-0000-0000-0000-000000000000` | `k8s/statefulset.yaml` (`OAUTH2_PROXY_CLIENT_ID`) | the client ID of the OIDC client |
+| `git.example.org` | `k8s/files/start.sh` (the key `credential.https://git.example.org.helper`) | the host of the repository's URL |
+| `noreply.example.org` | `k8s/files/start.sh` (the city's commit email) | the domain of the identity the city commits as |
+| `example.org` | `k8s/files/roomcity.toml` (`[matrix] server_name`, and the ids of the holders), `registration/sandbox.yaml.template` (both regexes, where it is written `example\.org`: keep the backslash; and its comments) | the homeserver's server name, which is what follows the colon of its Matrix ids and need not be the domain of the other hosts |
+| `@owner:example.org`, `@owner-app:example.org` | `k8s/files/roomcity.toml` (`[[chat.holders]]`) | the Matrix ids that hold the owner's role; remove the block of the second if you have none. An id of the form `@<city>:` or `@<city>-…:` is the application service's: the owner's is not one |
+| `sandbox`, as the city's name | `k8s/statefulset.yaml` (`CITY_NAME`), `k8s/files/roomcity.toml` (`[chat] name`, `[matrix] city`), `registration/sandbox.yaml.template` (`id`, `sender_localpart`, both regexes and its comments), `city/pack.toml` (`[pack] name`), the three `prompt.template.md` of `city/agents`, and step 7 below | the city's name, the same in all of them: lower-case letters and digits, no dash (`roomcity server` refuses a `[matrix] city` that is not `[a-z0-9]+`). `[matrix] city` and the registration's `sender_localpart` must be the same |
+| `roomcity-example` | `k8s/kustomization.yaml` (`namespace`), `k8s/namespace.yaml`, `k8s/files/roomcity.toml` (`[kube] namespace`, and `[server] url`, whose host is the Service `roomcity` in that namespace), `registration/sandbox.yaml.template` (`url`, the same address) | the namespace |
+| `http://homeserver.matrix.svc.cluster.local:8008` | `k8s/files/roomcity.toml` (`[matrix] homeserver`) | the homeserver's address in the cluster |
+| `matrix` and `app.kubernetes.io/name: homeserver`; `ingress` and `app.kubernetes.io/name: ingress-controller` | `k8s/network-policy.yaml` | the namespace and the pods' label of your homeserver, and of your ingress controller |
+| `dolt.dolt.svc.cluster.local`, `3306` | `k8s/statefulset.yaml` (`CITY_DOLT_HOST`, `CITY_DOLT_PORT`), `city/city.toml` (`[dolt] host`, `port`), and the section name of the Secret `dolt`'s `credentials` | the Dolt server's host and port |
+| `city`, as the Dolt user | `k8s/statefulset.yaml` (`CITY_DOLT_USER`) | the city's user on the Dolt server. Not the other `city`: `/home/city`, `$HOME/city`, `[server] data` and `city_dir`, and `scope = "city"` in `city/` are the image's user, its home and the checkout, and stay |
+| `sandbox`, as the Dolt database | `k8s/statefulset.yaml` (`CITY_DOLT_DATABASE`) | the city's database on the Dolt server; it need not be the city's name |
 | `ingressClassName: example` | `k8s/ui.ingress.yaml` | your ingress class; add the annotations your cluster needs for a certificate and a DNS record |
-| the labels and namespace of the homeserver and of the ingress controller | `k8s/network-policy.yaml` | those of your cluster |
-| `storageClassName` | `k8s/statefulset.yaml` | a class of your cluster, or leave it out for the default |
-| the image tag, `sarak.sh/mikluko/roomcity:<version>` | `k8s/statefulset.yaml`, `k8s/files/roomcity.toml` | the release you run; the pod and `kube.image` must name the same |
+| `# storageClassName: standard` | `k8s/statefulset.yaml`, commented out | uncomment it with a class of your cluster, or leave it for the default |
+| the image tag, `sarak.sh/mikluko/roomcity:<version>` | `k8s/statefulset.yaml` (both containers), `k8s/files/roomcity.toml` (`[kube] image`) | the release you run; the pod and `kube.image` must name the same image |
 | the pack's range, `version` of `[imports.roomcity]` | `city/pack.toml` | the minor of the release you run: a caret below 1.0 holds the minor, and the pack and the image of one release are kept together |
 
 ## Where it departs from the deployment
@@ -101,23 +118,31 @@ the pod starts, with the keys below.
 
 For example: `kubectl -n roomcity-example create secret generic kimi --from-file=api-key=./kimi-key`.
 
+The two tokens of the registration are any text that is not empty; `roomcity
+server` cuts the whitespace around each. `openssl rand -hex 32` makes one.
+
 ## The order
 
-1. Make the city's repository from `city/` on your Git server, with `main` as
-   its branch, and the user that reads it.
+1. Make the city's repository on your Git server, with the files of `city/` at
+   its root and `main` as its branch, and the user that reads it.
 2. Make the Dolt user and the database. Nothing else is needed there: the pod
    makes the city's store in it at its first start.
 3. Make the OIDC client and note its ID and secret.
 4. Replace the placeholders. Make the namespace (`kubectl apply -f k8s/namespace.yaml`)
    and the Secrets.
 5. Fill `registration/sandbox.yaml.template` in (the same two tokens as the
-   Secret `matrix`), give it to the homeserver and restart the homeserver so
-   that it reads the registration.
+   Secret `matrix`), give it to the homeserver (Tuwunel: in the directory its
+   `appservice_dir` names) and restart the homeserver so that it reads the
+   registration.
 6. `kubectl apply -k k8s`. The pod starts: `gc` makes the store and the
    supervisor starts the city's always-on agents, which makes the server start a
    Job for each.
 7. The city's space and the rooms of `host` and `guest` appear on the homeserver;
    the owner is invited. Join `#sandbox-host:example.org` and write to it.
+
+To see what the pod does: `kubectl -n roomcity-example logs roomcity-0 -c gc`
+is the steps of `start.sh` and the supervisor, and `-c roomcity` the server. A
+session's Job and pod are in `kubectl -n roomcity-example get jobs,pods`.
 
 The first start of a session takes several seconds, since a pod has to start.
 If `gc` has been refused a start several times in a row it holds the next one
