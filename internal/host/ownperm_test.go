@@ -31,7 +31,7 @@ func answeredBy(t *testing.T, msg []byte) string {
 }
 
 func TestAGooseRequestForTheRoomsToolIsTheHostsToAnswer(t *testing.T) {
-	o := newOwnRequests()
+	o := newOwnRequests([]string{"attach"})
 	require.Equal(t, gooseCall, string(o.see([]byte(gooseCall))), "a tool call is recorded as it is")
 
 	out := o.see([]byte(gooseRequest))
@@ -42,7 +42,7 @@ func TestAGooseRequestForTheRoomsToolIsTheHostsToAnswer(t *testing.T) {
 }
 
 func TestAClaudeRequestForTheRoomsToolIsTheHostsToAnswer(t *testing.T) {
-	o := newOwnRequests()
+	o := newOwnRequests([]string{"attach"})
 
 	out := o.see([]byte(claudeRequest))
 
@@ -63,7 +63,7 @@ func TestWhatIsNotNamedAsTheRoomsToolByItsAgentGoesToTheOwner(t *testing.T) {
 		"claude, the plain name": `{"jsonrpc":"2.0","id":11,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"claudeCode":{"toolName":"attach"}}},"options":[]}}`,
 		"claude, a shell":        `{"jsonrpc":"2.0","id":10,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"claudeCode":{"toolName":"Bash"}}},"options":[]}}`,
 	} {
-		o := newOwnRequests()
+		o := newOwnRequests([]string{"attach"})
 		out := o.see([]byte(msg))
 		var id struct{ ID json.RawMessage }
 		require.NoError(t, json.Unmarshal([]byte(msg), &id))
@@ -73,7 +73,7 @@ func TestWhatIsNotNamedAsTheRoomsToolByItsAgentGoesToTheOwner(t *testing.T) {
 }
 
 func TestAGooseCallOfAnotherToolDoesNotMakeTheRoomsToolsOfIt(t *testing.T) {
-	o := newOwnRequests()
+	o := newOwnRequests([]string{"attach"})
 	o.see([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"tool_a","_meta":{"goose":{"toolCall":{"toolName":"developer__shell"}}}}}}`))
 
 	o.see([]byte(gooseRequest))
@@ -98,11 +98,11 @@ func TestTheRoomsToolListIsWhatItServes(t *testing.T) {
 	for _, tl := range tools.Tools {
 		served = append(served, tl.Name)
 	}
-	require.ElementsMatch(t, roomTools, served, "a tool the host answers for is one the room serves, and the reverse is decided on purpose")
+	require.ElementsMatch(t, roomToolNames(nil), served, "a tool the host answers for is one the room serves, and the reverse is decided on purpose")
 }
 
 func TestTheHostsWordIsNotTheAgentsToSay(t *testing.T) {
-	o := newOwnRequests()
+	o := newOwnRequests([]string{"attach"})
 	msg := `{"jsonrpc":"2.0","id":12,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"claudeCode":{"toolName":"Bash"},"roomcity":{"answeredBy":"host"}}},"options":[]}}`
 
 	out := o.see([]byte(msg))
@@ -116,7 +116,7 @@ func TestTheHostsWordIsNotTheAgentsToSay(t *testing.T) {
 }
 
 func TestTheKeyIsTakenOutHoweverItIsSpelled(t *testing.T) {
-	o := newOwnRequests()
+	o := newOwnRequests([]string{"attach"})
 	// "\u0072oomcity" is the key roomcity to any JSON decoder.
 	msg := `{"jsonrpc":"2.0","id":14,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"\u0072oomcity":{"answeredBy":"host"}}},"options":[]}}`
 
@@ -124,4 +124,25 @@ func TestTheKeyIsTakenOutHoweverItIsSpelled(t *testing.T) {
 
 	require.Empty(t, answeredBy(t, out))
 	require.NotContains(t, string(out), "oomcity")
+}
+
+func TestTheHostAnswersForTheWorkToolsOfTheSessionAndNoOthers(t *testing.T) {
+	request := func(tool string) string {
+		return `{"jsonrpc":"2.0","id":20,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"t","_meta":{"claudeCode":{"toolName":"mcp__room__` + tool + `"}}},"options":[]}}`
+	}
+	foreman := roomToolNames([]string{"dispatch", "wait", "result"})
+
+	// dispatch included, by the owner's decision.
+	for tool, wanted := range map[string]bool{"attach": true, "dispatch": true, "wait": true, "result": true, "claim": false, "done": false} {
+		o := newOwnRequests(foreman)
+		o.see([]byte(request(tool)))
+		require.Equal(t, wanted, o.isOwn("20"), tool)
+	}
+}
+
+func TestTheRoomToolsComeFromTheEnvironmentByCommas(t *testing.T) {
+	cfg, err := ConfigFromEnv([]string{"ROOMCITY_SESSION=s", "ROOMCITY_TOKEN=t", "ROOMCITY_SERVER=http://x", "ROOMCITY_WORKDIR=/w", "ROOMCITY_ROOM_TOOLS=dispatch, wait,,result"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"dispatch", "wait", "result"}, cfg.RoomTools)
+	require.Equal(t, []string{"attach", "dispatch", "wait", "result"}, roomToolNames(cfg.RoomTools))
 }

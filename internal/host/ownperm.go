@@ -3,18 +3,21 @@ package host
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 
 	acp "github.com/afrase/acp-go/unstable"
 )
 
-// roomTools are the tools of the room that the host answers the agent's
-// request for leave to use, on the owner's behalf: what each does is shown to
-// the owner as it happens, and to ask him whether the agent may show him a
-// file is noise. A tool that reaches outside the room or spends something is
-// on this list deliberately, or it is left to the owner.
-var roomTools = []string{"attach"}
+// The tools of the room that the host answers the agent's request for leave to
+// use, on the owner's behalf, are all the session has (roomToolNames): what each
+// does is shown to the owner as it happens, and to ask him first is noise. That
+// holds for dispatch by the owner's decision, and it is a decision: an agent
+// with dispatch starts a worker with any task and nobody is asked, and a worker
+// asks nobody for what it runs; the room shows each handing over. A tool that
+// reaches outside the room or spends something is put among them by a decision
+// of its own.
 
 // answeredByKey is set, in _meta.roomcity of the request's tool call, in the
 // copy of a permission request that goes to the server, so that the room and
@@ -29,13 +32,14 @@ const answeredByKey = "roomcity"
 // request, to which the request's toolCallId leads. A request that is not
 // named so by its agent goes to the owner like any other.
 type ownRequests struct {
+	tools []string // the room's tools the session has
 	mu    sync.Mutex
 	goose map[string]string // toolCallId of a goose tool call of the room's -> tool
 	own   map[string]bool   // the JSON-RPC ids of the permission requests that are the room's
 }
 
-func newOwnRequests() *ownRequests {
-	return &ownRequests{goose: map[string]string{}, own: map[string]bool{}}
+func newOwnRequests(tools []string) *ownRequests {
+	return &ownRequests{tools: tools, goose: map[string]string{}, own: map[string]bool{}}
 }
 
 // isOwn says whether the request with that JSON-RPC id, as it was written, is
@@ -80,7 +84,7 @@ func (o *ownRequests) see(msg []byte) []byte {
 		if tool == "" {
 			tool = claudeRoomTool(m.Params.ToolCall)
 		}
-		if !isRoomTool(tool) || len(m.ID) == 0 {
+		if !slices.Contains(o.tools, tool) || len(m.ID) == 0 {
 			return withoutAnswerer(msg)
 		}
 		o.mu.Lock()
@@ -89,15 +93,6 @@ func (o *ownRequests) see(msg []byte) []byte {
 		return withAnswerer(msg)
 	}
 	return msg
-}
-
-func isRoomTool(name string) bool {
-	for _, t := range roomTools {
-		if t == name {
-			return true
-		}
-	}
-	return false
 }
 
 // claudeRoomTool is the tool of the room that a Claude Code tool call names,

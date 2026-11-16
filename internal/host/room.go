@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"sarak.sh/mikluko/roomcity/internal/config"
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 )
 
@@ -39,19 +41,44 @@ const sendTimeout = 2 * time.Minute
 type room struct {
 	workDir string
 	secret  string
-	send    func(context.Context, *roomcityv1.SendRequest) (string, error)
+	session string
+	rpc     roomRPC
+	tools   []string
 	srv     *http.Server
 	url     string
 }
 
-// startRoom serves the room's tools on a loopback port until stop is called.
-// send hands one file to the server and returns the room's event for it.
-func startRoom(workDir string, send func(context.Context, *roomcityv1.SendRequest) (string, error)) (*room, error) {
+// roomRPC is what the room's tools call on the server: the session's side of
+// HostService. The session's token is the client's.
+type roomRPC interface {
+	Send(context.Context, *connect.Request[roomcityv1.SendRequest]) (*connect.Response[roomcityv1.SendResponse], error)
+	Dispatch(context.Context, *connect.Request[roomcityv1.DispatchRequest]) (*connect.Response[roomcityv1.DispatchResponse], error)
+	Wait(context.Context, *connect.Request[roomcityv1.WaitRequest]) (*connect.Response[roomcityv1.WaitResponse], error)
+	Claim(context.Context, *connect.Request[roomcityv1.ClaimRequest]) (*connect.Response[roomcityv1.ClaimResponse], error)
+	Done(context.Context, *connect.Request[roomcityv1.DoneRequest]) (*connect.Response[roomcityv1.DoneResponse], error)
+	Result(context.Context, *connect.Request[roomcityv1.ResultRequest]) (*connect.Response[roomcityv1.ResultResponse], error)
+}
+
+// roomToolNames is attach and the work tools that extra names, once each and in
+// the order of workTools; a name that is no tool of the room is left out.
+func roomToolNames(extra []string) []string {
+	names := []string{"attach"}
+	for _, t := range config.RoomTools {
+		if slices.Contains(extra, t) {
+			names = append(names, t)
+		}
+	}
+	return names
+}
+
+// startRoom serves the room's tools, the names tools holds, on a loopback port
+// until stop is called.
+func startRoom(workDir, session string, rpc roomRPC, tools []string) (*room, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
-	r := &room{workDir: workDir, secret: hex.EncodeToString(b), send: send}
+	r := &room{workDir: workDir, secret: hex.EncodeToString(b), session: session, rpc: rpc, tools: tools}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -90,12 +117,44 @@ type attachArgs struct {
 
 func (r *room) server() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: roomServerName, Version: "1"}, nil)
-	mcp.AddTool(s, &mcp.Tool{
-		Name: "attach",
-		Description: "Send a file of your working directory to the room, where the owner reads this conversation: an image is shown in it, " +
-			"anything else is a file the owner can download. Use it for a chart, a screenshot, a report or any file the owner should see; " +
-			"the owner cannot open files in your pod. It answers when the room has the file, or says why it does not.",
-	}, r.attach)
+	for _, name := range r.tools {
+		switch name {
+		case "attach":
+			mcp.AddTool(s, &mcp.Tool{
+				Name: "attach",
+				Description: "Send a file of your working directory to the room, where the owner reads this conversation: an image is shown in it, " +
+					"anything else is a file the owner can download. Use it for a chart, a screenshot, a report or any file the owner should see; " +
+					"the owner cannot open files in your pod. It answers when the room has the file, or says why it does not.",
+			}, r.attach)
+		case "dispatch":
+			mcp.AddTool(s, &mcp.Tool{
+				Name: "dispatch",
+				Description: "Hand a task to a worker. Say in full what the worker is to do: it has nothing but what you write here. " +
+					"It answers with the task's id, which wait and result take.",
+			}, r.dispatch)
+		case "wait":
+			mcp.AddTool(s, &mcp.Tool{
+				Name: "wait",
+				Description: "Ask to be told when a task you dispatched is closed. The telling arrives later as a message to you, " +
+					"so end your turn after asking if there is nothing else to do.",
+			}, r.wait)
+		case "result":
+			mcp.AddTool(s, &mcp.Tool{
+				Name:        "result",
+				Description: "Read how a task you dispatched stands and, once it is closed, what the worker made of it.",
+			}, r.result)
+		case "claim":
+			mcp.AddTool(s, &mcp.Tool{
+				Name:        "claim",
+				Description: "Take the task you were started for. When there is none, the session ends.",
+			}, r.claim)
+		case "done":
+			mcp.AddTool(s, &mcp.Tool{
+				Name:        "done",
+				Description: "Close the task you claimed with what came of it, for the one who dispatched it to read. The session ends.",
+			}, r.done)
+		}
+	}
 	return s
 }
 
@@ -108,7 +167,7 @@ func (r *room) attach(ctx context.Context, _ *mcp.CallToolRequest, in attachArgs
 	}
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	if _, err := r.send(ctx, &roomcityv1.SendRequest{Name: name, MediaType: media, Caption: in.Caption, Data: data}); err != nil {
+	if _, err := r.rpc.Send(ctx, connect.NewRequest(&roomcityv1.SendRequest{Session: r.session, Name: name, MediaType: media, Caption: in.Caption, Data: data})); err != nil {
 		return refused(fmt.Errorf("the room did not take %s: %s", name, reason(err))), nil, nil
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%s is in the room (%s, %d bytes).", name, media, len(data))}}}, nil, nil
@@ -182,4 +241,88 @@ func readInside(workDir, path string) (name, media string, data []byte, err erro
 		media = mt
 	}
 	return name, media, data, nil
+}
+
+type taskArgs struct {
+	Task string `json:"task" jsonschema:"the task's id, as dispatch gave it"`
+}
+
+type dispatchArgs struct {
+	Task string `json:"task" jsonschema:"what the worker is to do, in full"`
+}
+
+type doneArgs struct {
+	Result string `json:"result" jsonschema:"what came of the task"`
+}
+
+type noArgs struct{}
+
+// said is a tool's answer that says text.
+func said(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+}
+
+// call bounds one call of the server.
+func call(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, sendTimeout)
+}
+
+func (r *room) dispatch(ctx context.Context, _ *mcp.CallToolRequest, in dispatchArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(in.Task) == "" {
+		return refused(errors.New("no task given")), nil, nil
+	}
+	ctx, cancel := call(ctx)
+	defer cancel()
+	res, err := r.rpc.Dispatch(ctx, connect.NewRequest(&roomcityv1.DispatchRequest{Session: r.session, Task: in.Task}))
+	if err != nil {
+		return refused(fmt.Errorf("the task was not handed to a worker: %s", reason(err))), nil, nil
+	}
+	return said("Handed to a worker as task " + res.Msg.TaskId + "."), nil, nil
+}
+
+func (r *room) wait(ctx context.Context, _ *mcp.CallToolRequest, in taskArgs) (*mcp.CallToolResult, any, error) {
+	ctx, cancel := call(ctx)
+	defer cancel()
+	if _, err := r.rpc.Wait(ctx, connect.NewRequest(&roomcityv1.WaitRequest{Session: r.session, TaskId: in.Task})); err != nil {
+		return refused(fmt.Errorf("not waiting for task %s: %s", in.Task, reason(err))), nil, nil
+	}
+	return said("You will be told when task " + in.Task + " is closed."), nil, nil
+}
+
+func (r *room) result(ctx context.Context, _ *mcp.CallToolRequest, in taskArgs) (*mcp.CallToolResult, any, error) {
+	ctx, cancel := call(ctx)
+	defer cancel()
+	res, err := r.rpc.Result(ctx, connect.NewRequest(&roomcityv1.ResultRequest{Session: r.session, TaskId: in.Task}))
+	if err != nil {
+		return refused(fmt.Errorf("no result for task %s: %s", in.Task, reason(err))), nil, nil
+	}
+	if !res.Msg.Closed {
+		return said(fmt.Sprintf("Task %s is not done yet (%s).", in.Task, res.Msg.Status)), nil, nil
+	}
+	if strings.TrimSpace(res.Msg.Result) == "" {
+		return said("Task " + in.Task + " is closed, and the worker left nothing."), nil, nil
+	}
+	return said(res.Msg.Result), nil, nil
+}
+
+func (r *room) claim(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+	ctx, cancel := call(ctx)
+	defer cancel()
+	res, err := r.rpc.Claim(ctx, connect.NewRequest(&roomcityv1.ClaimRequest{Session: r.session}))
+	if err != nil {
+		return refused(fmt.Errorf("no task could be claimed: %s", reason(err))), nil, nil
+	}
+	if !res.Msg.Found {
+		return said("There is no task for you; this session is ending."), nil, nil
+	}
+	return said("Task " + res.Msg.TaskId + ":\n" + res.Msg.Text), nil, nil
+}
+
+func (r *room) done(ctx context.Context, _ *mcp.CallToolRequest, in doneArgs) (*mcp.CallToolResult, any, error) {
+	ctx, cancel := call(ctx)
+	defer cancel()
+	if _, err := r.rpc.Done(ctx, connect.NewRequest(&roomcityv1.DoneRequest{Session: r.session, Result: in.Result})); err != nil {
+		return refused(fmt.Errorf("the task was not closed: %s", reason(err))), nil, nil
+	}
+	return said("The task is closed; this session is ending."), nil, nil
 }

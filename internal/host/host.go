@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 
 	"sarak.sh/mikluko/claudeacp/claudeacp"
 
+	"sarak.sh/mikluko/roomcity/internal/config"
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
 	"sarak.sh/mikluko/roomcity/internal/sessionauth"
@@ -48,6 +51,9 @@ type Config struct {
 	Retry time.Duration
 	// Now is the clock of the frames; nil is time.Now.
 	Now func() time.Time
+	// RoomTools are the tools of the room besides attach that the session has:
+	// dispatch, wait, result, claim or done. The server names them.
+	RoomTools []string
 }
 
 const (
@@ -57,6 +63,9 @@ const (
 	// envSettings names a settings file for claude, with the hooks gc gives
 	// a terminal session; claude gets it as --settings. Optional.
 	envSettings = "ROOMCITY_SETTINGS"
+	// envRoomTools names, by commas, the work tools of the room the session
+	// has besides attach. Optional.
+	envRoomTools = "ROOMCITY_ROOM_TOOLS"
 )
 
 // ConfigFromEnv reads the session, its token, the server and the working
@@ -76,6 +85,12 @@ func ConfigFromEnv(env []string) (Config, error) {
 		case envSettings:
 			if value != "" {
 				cfg.Claude.ClaudeArgs = append(cfg.Claude.ClaudeArgs, "--settings", value)
+			}
+		case envRoomTools:
+			for _, t := range strings.Split(value, ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					cfg.RoomTools = append(cfg.RoomTools, t)
+				}
 			}
 		case sessionauth.EnvToken:
 			cfg.Token = value
@@ -164,7 +179,7 @@ func newHost(cfg Config) *host {
 		client:  roomcityv1connect.NewHostServiceClient(httpClient, cfg.Server, sessionauth.Client(cfg.Token)),
 		pending: map[string]chan string{},
 		wake:    make(chan struct{}, 1),
-		own:     newOwnRequests(),
+		own:     newOwnRequests(roomToolNames(cfg.RoomTools)),
 	}
 }
 
@@ -294,14 +309,12 @@ func (h *host) roomServers(hello *acp.InitializeResponse) ([]acp.MCPServer, erro
 		h.log.Info("the agent takes no http MCP server: the room's tools are not given to it")
 		return []acp.MCPServer{}, nil
 	}
-	r, err := startRoom(h.cfg.WorkDir, func(ctx context.Context, req *roomcityv1.SendRequest) (string, error) {
-		req.Session = h.cfg.Session
-		res, err := h.client.Send(ctx, connect.NewRequest(req))
-		if err != nil {
-			return "", err
+	for _, t := range h.cfg.RoomTools {
+		if !slices.Contains(config.RoomTools, t) {
+			h.log.Warn("a tool the server names is not one of the room's, and is left out", "tool", t)
 		}
-		return res.Msg.Event, nil
-	})
+	}
+	r, err := startRoom(h.cfg.WorkDir, h.cfg.Session, h.client, roomToolNames(h.cfg.RoomTools))
 	if err != nil {
 		return nil, fmt.Errorf("host: the room's tools: %w", err)
 	}

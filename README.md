@@ -63,6 +63,28 @@ Two limits, from the server's not being able to read or list Secrets:
 - A server that dies between making a session's Secret and making its Job leaves a Secret that nothing owns. The server cannot list Secrets to find it; the next start of the same session overwrites it and a stop of that name deletes it, and otherwise it stays until someone deletes it.
 - Starts of one name are serialized by the server and only the server makes a session's Job, so a Job that appears between the start's check for one and its own creation, made by hand, would find its Secret overwritten.
 
+## The room's tools for an agent
+
+The session host gives each agent an MCP server named `room`, over http on the pod's loopback with a secret of its own for the session, when the agent says it takes http MCP servers (Claude Code through claudeacp and goose do). Its tools are the agent's way to the room and to the other sessions of the city; the agent calls them by the names its own program gives them: `mcp__room__attach` in Claude Code, `room: attach` in goose.
+
+- `attach(path, caption)`: every session has it. A file of the working directory goes to the room, an image shown in the conversation and any other file a file to download; the agent is told why when it is refused (outside the working directory, too large, a kind the room does not take). `[chat] max_file` and `file_kinds` bound what the room takes.
+- `dispatch(task)`, `wait(task)` and `result(task)` for a foreman: hand a task to the pool of workers and get its id, ask to be told when it is closed (the telling comes later as gc's own prompt), and read how it stands and what came of it (`not done yet (<status>)`, or what the worker left).
+- `claim()` and `done(result)` for a worker: take the task the session was started for (none: the session ends) and close it with what came of it, which ends the session.
+
+The tools beyond `attach` are the agent's by its table in `roomcity.toml`:
+
+```toml
+[agents.foreman]
+tools = ["dispatch", "wait", "result"]
+
+[agents.worker]
+tools = ["claim", "done"]
+```
+
+The server puts the agent's list in the pod as `ROOMCITY_ROOM_TOOLS` (commas), the host offers exactly those, and the server refuses a call of a tool the agent does not have, whatever the host offered, in words the agent reads. A name that is not one of the five is refused when the configuration is loaded.
+
+The host answers the agent's request for leave to use the tools the session has itself, allowing the call once, and the room shows the owner nothing to answer (the request is recorded with `_meta.roomcity.answeredBy` = `"host"`). That holds for `dispatch` too, by the owner's decision, and it is a plain one: an agent with `dispatch` starts a worker with any task and nobody is asked, and a worker asks nobody for what it runs; the room shows each handing over.
+
 ## What a restart shows in a room
 
 The registry keeps, for each session, how far its room has been shown (`shown`), and the chat side takes the stream up from there when the server starts again or the room comes back from an outage. The record is the last event after which nothing was held back unsent: a restart in the middle of an answer shows the paragraph that was being written again, and the thoughts or the plan's edit that were being held, and nothing before them. What happened more than `[chat] catch_up` ago (an hour by default) is not shown, and the room says so in one notice that links the transcript.

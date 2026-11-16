@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The tools of the room for the handing of work reach the agent that has them: `dispatch(task)`, `wait(task)` and `result(task)` for a foreman, `claim()` and `done(result)` for a worker. The host offers, besides `attach`, the ones the server names in `ROOMCITY_ROOM_TOOLS` (`[agents.<name>] tools`), answers the agent's request for leave to use them itself, `dispatch` included (an agent with it starts a worker with any task and nobody is asked), and tells the agent the server's reason when a call is refused. The README says which tools an agent has and how (`[agents.<name>] tools`).
+
 ### Changed
 
 - The host gives the Claude Code it runs its to-do tools (claudeacp v0.7.0's `Config.TaskTools`, which sets `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` unless the environment already has it), so that Claude's task list reaches the room as a plan; a claude run with no terminal has none otherwise. A city that set the variable itself in its claude provider no longer needs to: its own value, `0` included, is kept.
