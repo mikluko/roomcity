@@ -102,6 +102,35 @@ func TestASecretNamesItsVariableOnlyWithAKey(t *testing.T) {
 	require.ErrorContains(t, err, "kube.secrets[0]")
 }
 
+func TestAgentsThatAreServicesRunAsProcesses(t *testing.T) {
+	c, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", `
+[agents."core.*"]
+process = true
+
+[agents."bd.dog"]
+process = true
+
+[agents.host]
+always_on = true
+
+[kube]`, 1)))
+	require.NoError(t, err)
+	require.True(t, c.IsProcess("core.control-dispatcher"))
+	require.True(t, c.IsProcess("bd.dog"))
+	require.False(t, c.IsProcess("bd.dog-2"))
+	require.False(t, c.IsProcess("host"))
+	require.False(t, c.IsProcess(""))
+
+	for _, bad := range []string{
+		"[agents.svc]\nprocess = true\nalways_on = true\n",
+		"[agents.svc]\nprocess = true\nsecrets = [{ name = \"s\", mount_path = \"/s\" }]\n",
+		"[agents.\"[\"]\nprocess = true\n",
+	} {
+		_, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", bad+"\n[kube]", 1)))
+		require.Error(t, err, bad)
+	}
+}
+
 func TestAnUnknownKeyIsAnError(t *testing.T) {
 	_, err := config.Parse([]byte(strings.Replace(minimal, "[kube]", "listn = \":1\"\n\n[kube]", 1)))
 	require.ErrorContains(t, err, "listn")

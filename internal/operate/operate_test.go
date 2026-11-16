@@ -2,8 +2,10 @@ package operate_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,7 @@ import (
 
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 	"sarak.sh/mikluko/roomcity/internal/operate"
+	"sarak.sh/mikluko/roomcity/internal/procs"
 	"sarak.sh/mikluko/roomcity/internal/session"
 )
 
@@ -380,4 +383,69 @@ func TestNudge(t *testing.T) {
 	r := f.do("nudge", "text", "nobody")
 	require.Equal(t, int32(1), r.ExitCode)
 	require.True(t, strings.Contains(string(r.Stderr), "not found"), string(r.Stderr))
+}
+
+func TestWhatGcStartsForAServiceAgentRunsAsAProcessOfTheServer(t *testing.T) {
+	m := &procs.Manager{LogDir: filepath.Join(t.TempDir(), "logs"), Grace: 500 * time.Millisecond}
+	f := newFixture(t, operate.Config{
+		Processes: m,
+		IsProcess: func(agent string) bool { return strings.HasPrefix(agent, "core.") },
+	})
+	cfg := f.startConfig(map[string]any{
+		"command":       "echo up; sleep 30",
+		"work_dir":      f.dir,
+		"process_names": []string{"gc"},
+		"env":           map[string]string{"GC_AGENT": "core.control-dispatcher", "GC_SESSION_ID": "gc-9"},
+	})
+
+	r := f.do("start", cfg, "dispatcher-1")
+	require.Zero(t, r.ExitCode, string(r.Stderr))
+	require.Empty(t, f.jobs.created, "no Job for a service")
+	_, err := f.reg.Get(f.ctx, "dispatcher-1")
+	require.ErrorIs(t, err, session.ErrNotFound, "no session either: it has no room")
+
+	require.Equal(t, "true", string(f.do("is-running", "", "dispatcher-1").Stdout))
+	require.Equal(t, "true", string(f.do("process-alive", "", "dispatcher-1").Stdout))
+	require.Equal(t, "dispatcher-1", string(f.do("list-running", "", "").Stdout))
+	require.Equal(t, "gc-9", string(f.do("get-meta", "", "dispatcher-1", "GC_SESSION_ID").Stdout))
+	require.Equal(t, "gc", string(f.do("get-meta", "", "dispatcher-1", "GT_PROCESS_NAMES").Stdout))
+
+	r = f.do("start", cfg, "dispatcher-1")
+	require.Equal(t, int32(1), r.ExitCode)
+	require.Contains(t, string(r.Stderr), "already exists")
+	r = f.do("nudge", "wake", "dispatcher-1")
+	require.Equal(t, int32(1), r.ExitCode)
+
+	require.Zero(t, f.do("stop", "", "dispatcher-1").ExitCode)
+	require.Equal(t, "false", string(f.do("is-running", "", "dispatcher-1").Stdout))
+	require.Empty(t, f.do("list-running", "", "").Stdout)
+	require.Empty(t, f.do("get-meta", "", "dispatcher-1", "GC_SESSION_ID").Stdout)
+	require.Zero(t, f.do("stop", "", "dispatcher-1").ExitCode, "stop is idempotent")
+}
+
+func TestAProcessStartSaysWhatItDoesNotCarryOut(t *testing.T) {
+	var logged bytes.Buffer
+	m := &procs.Manager{LogDir: filepath.Join(t.TempDir(), "logs"), Grace: 500 * time.Millisecond}
+	f := newFixture(t, operate.Config{
+		Processes: m,
+		IsProcess: func(string) bool { return true },
+		Log:       slog.New(slog.NewTextHandler(&logged, nil)),
+	})
+	// The fixture's start config has a nudge, a pre_start and an overlay_dir.
+	require.Zero(t, f.do("start", f.startConfig(map[string]any{"command": "sleep 30", "work_dir": filepath.Join(f.dir, "made")}), "svc-1").ExitCode)
+	require.Contains(t, logged.String(), "overlay_dir")
+	require.Contains(t, logged.String(), "pre_start")
+	require.Contains(t, logged.String(), "nudge")
+	require.DirExists(t, filepath.Join(f.dir, "made"), "the working directory is made")
+	require.Zero(t, f.do("stop", "", "svc-1").ExitCode)
+}
+
+func TestAServiceThatEndsOnItsOwnCanBeStartedAgain(t *testing.T) {
+	m := &procs.Manager{LogDir: filepath.Join(t.TempDir(), "logs")}
+	f := newFixture(t, operate.Config{Processes: m, IsProcess: func(string) bool { return true }})
+	cfg := f.startConfig(map[string]any{"command": "exit 1", "work_dir": f.dir})
+
+	require.Zero(t, f.do("start", cfg, "svc-1").ExitCode)
+	require.Eventually(t, func() bool { return string(f.do("is-running", "", "svc-1").Stdout) == "false" }, 5*time.Second, 20*time.Millisecond)
+	require.Zero(t, f.do("start", cfg, "svc-1").ExitCode)
 }

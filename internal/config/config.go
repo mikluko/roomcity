@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -63,6 +64,12 @@ type Server struct {
 // Agent is the table [agents.<name>].
 type Agent struct {
 	AlwaysOn bool `toml:"always_on"`
+	// Process says that what gc starts for this agent is no agent session
+	// but a service, which the server runs as a process of its own, with no
+	// room. The table's name is a pattern (path.Match) of the agent's name
+	// as gc gives it in GC_AGENT, so "core.*" names every service of the
+	// core pack.
+	Process bool `toml:"process"`
 	// Secrets are mounted in the pods of this agent's sessions and of no
 	// other's, on top of those of [kube].
 	Secrets []kube.Secret `toml:"secrets"`
@@ -180,6 +187,12 @@ func (c *Config) validate() error {
 		}
 	}
 	for agent, a := range c.Agents {
+		if _, err := path.Match(agent, ""); err != nil {
+			return fmt.Errorf("agents.%q is not a pattern: %w", agent, err)
+		}
+		if a.Process && (a.AlwaysOn || len(a.Secrets) > 0) {
+			return fmt.Errorf("agents.%q is a process, which has no room and takes no Secret of its own", agent)
+		}
 		for i, sec := range a.Secrets {
 			if err := sec.Validate(); err != nil {
 				return fmt.Errorf("agents.%s.secrets[%d]: %w", agent, i, err)
@@ -206,6 +219,17 @@ func loopback(addr string) error {
 		return fmt.Errorf("%q is not a loopback address", addr)
 	}
 	return nil
+}
+
+// IsProcess says whether what gc starts for the agent is run as a process of
+// the server.
+func (c Config) IsProcess(agent string) bool {
+	for pattern, a := range c.Agents {
+		if ok, _ := path.Match(pattern, agent); ok && a.Process {
+			return true
+		}
+	}
+	return false
 }
 
 // AlwaysOn says whether the agent's sessions are always-on.

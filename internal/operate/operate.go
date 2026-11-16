@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	roomcityv1 "sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
+	"sarak.sh/mikluko/roomcity/internal/procs"
 	"sarak.sh/mikluko/roomcity/internal/session"
 )
 
@@ -70,6 +72,28 @@ type Config struct {
 	// StopGrace is how long stop waits for the host to take the Stop
 	// instruction before it deletes the Job; 0 is 5 seconds.
 	StopGrace time.Duration
+	// IsProcess says whether what gc starts for the agent is no agent
+	// session but a service, run as a process of the server. Nil says none.
+	IsProcess func(agent string) bool
+	// Processes runs those; it is needed when IsProcess is.
+	Processes Processes
+	// Log is where the server says what it did not do; nil is slog's default.
+	Log *slog.Logger
+}
+
+func (c Config) log() *slog.Logger {
+	if c.Log != nil {
+		return c.Log
+	}
+	return slog.Default()
+}
+
+// Processes runs what gc starts that is not an agent session.
+type Processes interface {
+	Start(name string, spec procs.Spec) error
+	Stop(ctx context.Context, name string) error
+	Alive(name string) bool
+	Running() []string
 }
 
 // Operator implements roomcityv1connect.RuntimeServiceHandler. It trusts its
@@ -198,6 +222,9 @@ func (o *Operator) run(ctx context.Context, m *roomcityv1.OperateRequest) result
 // alive reports whether the session is registered, has not ended and has a
 // Job whose pod lives.
 func (o *Operator) alive(ctx context.Context, name string) (bool, error) {
+	if o.isProcess(name) {
+		return true, nil
+	}
 	info, err := o.reg.Get(ctx, name)
 	if errors.Is(err, session.ErrNotFound) {
 		return false, nil
@@ -209,6 +236,11 @@ func (o *Operator) alive(ctx context.Context, name string) (bool, error) {
 		return false, nil
 	}
 	return o.jobs.Alive(ctx, name)
+}
+
+// isProcess reports whether a process of the server runs under name.
+func (o *Operator) isProcess(name string) bool {
+	return o.cfg.Processes != nil && o.cfg.Processes.Alive(name)
 }
 
 func (o *Operator) listRunning(ctx context.Context, prefix string) result {
@@ -226,6 +258,13 @@ func (o *Operator) listRunning(ctx context.Context, prefix string) result {
 			names = append(names, i.Name)
 		}
 	}
+	if o.cfg.Processes != nil {
+		for _, n := range o.cfg.Processes.Running() {
+			if strings.HasPrefix(n, prefix) {
+				names = append(names, n)
+			}
+		}
+	}
 	sort.Strings(names)
 	return ok(strings.Join(names, "\n"))
 }
@@ -233,6 +272,9 @@ func (o *Operator) listRunning(ctx context.Context, prefix string) result {
 func (o *Operator) nudge(ctx context.Context, name, text string) result {
 	if text == "" {
 		return ok("")
+	}
+	if o.isProcess(name) {
+		return failf("nudge %s: a process of the server takes no prompt", name)
 	}
 	if _, err := o.reg.Nudge(ctx, name, text); err != nil {
 		return failf("nudge %s: %v", name, err)
@@ -272,6 +314,9 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	} else if alive {
 		return failf("start %s: session already exists", name)
 	}
+	if o.cfg.IsProcess != nil && o.cfg.IsProcess(sc.Env["GC_AGENT"]) {
+		return o.startProcess(ctx, name, sc)
+	}
 	manifest, archive, err := sc.bundle()
 	if err != nil {
 		return failf("start %s: %v", name, err)
@@ -301,23 +346,8 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	if err := o.reg.PutBundle(ctx, name, manifest, archive); err != nil {
 		return fail("start %s: %v", name, err)
 	}
-	if err := o.reg.ClearMarks(ctx, name); err != nil {
+	if err := o.setMarks(ctx, name, sc); err != nil {
 		return fail("start %s: %v", name, err)
-	}
-	marks := map[string]string{}
-	for _, k := range identityKeys {
-		marks[k] = sc.Env[k]
-	}
-	if marks["GT_PROCESS_NAMES"] == "" {
-		marks["GT_PROCESS_NAMES"] = strings.Join(sc.ProcessNames, ",")
-	}
-	for k, v := range marks {
-		if v == "" {
-			continue
-		}
-		if err := o.reg.SetMark(ctx, name, k, v); err != nil {
-			return fail("start %s: %v", name, err)
-		}
 	}
 	if sc.Nudge != "" {
 		if _, err := o.reg.Nudge(ctx, name, sc.Nudge); err != nil {
@@ -351,10 +381,65 @@ func (o *Operator) start(ctx context.Context, name string, stdin []byte) result 
 	}
 }
 
+// setMarks forgets the marks of the session's earlier life and sets the
+// identity ones gc reads back.
+func (o *Operator) setMarks(ctx context.Context, name string, sc startConfig) error {
+	if err := o.reg.ClearMarks(ctx, name); err != nil {
+		return err
+	}
+	marks := map[string]string{}
+	for _, k := range identityKeys {
+		marks[k] = sc.Env[k]
+	}
+	if marks["GT_PROCESS_NAMES"] == "" {
+		marks["GT_PROCESS_NAMES"] = strings.Join(sc.ProcessNames, ",")
+	}
+	for k, v := range marks {
+		if v == "" {
+			continue
+		}
+		if err := o.reg.SetMark(ctx, name, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// startProcess runs what gc starts for a service agent as a process of the
+// server, which has no room, no host and no ACP. The command, the working
+// directory and the environment of the start config are carried out. Its
+// pre_start, overlays, copied files, setup commands and setup script, and
+// its nudge, are not: a service has no pod to stage them in, and the start
+// says so in the log when the config names one.
+func (o *Operator) startProcess(ctx context.Context, name string, sc startConfig) result {
+	if o.cfg.Processes == nil {
+		return failf("start %s: the server runs no processes", name)
+	}
+	if ignored := sc.notCarriedOutForAProcess(); len(ignored) > 0 {
+		o.cfg.log().Warn("the start config of a process names what a process does not get", "session", name, "ignored", ignored)
+	}
+	if err := o.setMarks(ctx, name, sc); err != nil {
+		return failf("start %s: %v", name, err)
+	}
+	if err := o.cfg.Processes.Start(name, procs.Spec{Command: sc.Command, WorkDir: sc.WorkDir, Env: sc.Env}); err != nil {
+		return failf("start %s: %v", name, err)
+	}
+	return ok("")
+}
+
 // stop ends the session: its host is told to stop, the session ends, its
 // Job is deleted and its marks are forgotten. A session that does not exist
 // is stopped all the same.
 func (o *Operator) stop(ctx context.Context, name string) result {
+	if o.isProcess(name) {
+		if err := o.cfg.Processes.Stop(ctx, name); err != nil {
+			return failf("stop %s: %v", name, err)
+		}
+		if err := o.reg.ClearMarks(ctx, name); err != nil {
+			return failf("stop %s: %v", name, err)
+		}
+		return ok("")
+	}
 	info, err := o.reg.Get(ctx, name)
 	switch {
 	case errors.Is(err, session.ErrNotFound):

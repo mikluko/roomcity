@@ -45,6 +45,28 @@ type startConfig struct {
 	CopyFiles          []copyEntry       `json:"copy_files,omitempty"`
 }
 
+// notCarriedOutForAProcess names what the start config holds that the start
+// of a process does not carry out.
+func (sc startConfig) notCarriedOutForAProcess() []string {
+	var out []string
+	for name, set := range map[string]bool{
+		"pre_start":            len(sc.PreStart) > 0,
+		"session_setup":        len(sc.SessionSetup) > 0,
+		"session_setup_script": sc.SessionSetupScript != "",
+		"session_live":         len(sc.SessionLive) > 0,
+		"pack_overlay_dirs":    len(sc.PackOverlayDirs) > 0,
+		"overlay_dir":          sc.OverlayDir != "",
+		"copy_files":           len(sc.CopyFiles) > 0,
+		"nudge":                sc.Nudge != "",
+	} {
+		if set {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func parseStartConfig(b []byte) (startConfig, error) {
 	var sc startConfig
 	if len(bytes.TrimSpace(b)) == 0 {

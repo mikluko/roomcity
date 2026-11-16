@@ -20,6 +20,7 @@ import (
 	"sarak.sh/mikluko/roomcity/internal/gchandler"
 	"sarak.sh/mikluko/roomcity/internal/gen/roomcity/v1/roomcityv1connect"
 	"sarak.sh/mikluko/roomcity/internal/operate"
+	"sarak.sh/mikluko/roomcity/internal/procs"
 	"sarak.sh/mikluko/roomcity/internal/server"
 	"sarak.sh/mikluko/roomcity/internal/session"
 	"sarak.sh/mikluko/roomcity/internal/transcripts"
@@ -27,6 +28,10 @@ import (
 
 // DatabaseFile is the registry's file in the configuration's data directory.
 const DatabaseFile = "roomcity.db"
+
+// ProcessLogDir is the directory of the data directory that holds the output
+// of the processes the server runs.
+const ProcessLogDir = "processes"
 
 // shutdownGrace is how long the listeners get to finish a call once the
 // server is told to stop.
@@ -128,6 +133,9 @@ func Run(ctx context.Context, o Options) error {
 		AlwaysOn:     cfg.AlwaysOn,
 		StartTimeout: cfg.Server.StartTimeout.Duration(),
 		StopGrace:    cfg.Server.StopGrace.Duration(),
+		IsProcess:    cfg.IsProcess,
+		Processes:    &procs.Manager{LogDir: filepath.Join(cfg.Server.Data, ProcessLogDir)},
+		Log:          log,
 	})))
 
 	s.HandlePage(transcripts.Prefix, (&transcripts.Page{Source: reg, City: cfg.Chat.Name}).Handler())
