@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated: https://github.com/gastownhall/gascity f715d7b.
+
 ## [0.14.0] - 2026-11-16
 
 ### Added
